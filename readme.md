@@ -113,6 +113,10 @@ credit-card-payment-service/
 │   ├── config/
 │   │   └── config.go                # App config (env binding)
 │   │
+│   ├── logger/
+│   │   ├── logger.go                # Logger
+│   │   └── middleware.go
+│   │
 │   ├── domain/
 │   │   ├── merchant.go              # Merchant entity, status, API key
 │   │   ├── payment.go               # Payment entity, value objects, status
