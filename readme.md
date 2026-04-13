@@ -91,19 +91,15 @@ pending → authorized → captured → refunded
 
 #### 3. Tech Stack
 
-| Component           | Technology              |
-| ------------------- | ----------------------- |
-| Language            | Go                      |
-| Framework           | Gin                     |
-| Database            | PostgreSQL              |
-| Cache / Idempotency | Redis                   |
-| DB Migration        | golang-migrate          |
-| Config              | godotenv                |
-| Logging             | zerolog                 |
-| Testing             | testify                 |
-| Container           | Docker / Docker Compose |
-
----
+| Component | Technology              |
+| --------- | ----------------------- |
+| Language  | Go                      |
+| Framework | Gin                     |
+| Database  | PostgreSQL              |
+| Cache     | Redis                   |
+| Logging   | zerolog                 |
+| Testing   | testify                 |
+| Container | Docker / Docker Compose |
 
 #### 4. Project Structure
 
@@ -116,6 +112,10 @@ credit-card-payment-service/
 ├── internal/
 │   ├── config/
 │   │   └── config.go                # App config (env binding)
+│   │
+│   ├── logger/
+│   │   ├── logger.go                # Logger
+│   │   └── middleware.go
 │   │
 │   ├── domain/
 │   │   ├── merchant.go              # Merchant entity, status, API key
