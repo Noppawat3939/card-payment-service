@@ -113,9 +113,11 @@ credit-card-payment-service/
 │   ├── config/
 │   │   └── config.go                # Env config + DSN helper
 │   │
-│   ├── database/
-│   │   ├── postgres.go              # GORM PostgreSQL connection
-│   │   └── redis.go                 # Redis connection
+│   ├── infra/
+│   │   └── database/
+│   │       └── database.go          # GORM PostgreSQL connection
+│   │   └── redis/
+│   │       └── redis.go             # Redis connection
 │   │
 │   ├── logger/
 │   │   ├── logger.go                # Zerolog initialization

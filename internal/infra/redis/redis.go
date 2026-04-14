@@ -1,4 +1,4 @@
-package database
+package redis
 
 import (
 	"card-payment-service/internal/config"

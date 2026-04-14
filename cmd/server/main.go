@@ -2,7 +2,8 @@ package main
 
 import (
 	"card-payment-service/internal/config"
-	"card-payment-service/internal/database"
+	"card-payment-service/internal/infra/database"
+	ridisClient "card-payment-service/internal/infra/redis"
 	"card-payment-service/internal/logger"
 	"card-payment-service/internal/router"
 	"context"
@@ -39,7 +40,7 @@ func main() {
 	defer database.CloseDB(db)
 
 	// connect to redis
-	client, err := database.NewRedis(cfg)
+	client, err := ridisClient.NewRedis(cfg)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to connect redis")
 	}
