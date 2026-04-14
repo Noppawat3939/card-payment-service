@@ -189,73 +189,6 @@ credit-card-payment-service/
 
 #### 5. Sequence Diagram Flow
 
-##### Payment Charge Flow
-
-```mermaid
-sequenceDiagram
-    actor C as Client
-    participant S as Payment Service
-    participant DB as Database
-    participant GW as Payment Gateway
-
-    C->>S: POST /api/v1/payments/charge<br/>Header: X-API-Key, Idempotency-Key
-    S->>S: Validate API Key + merchant status
-    S->>DB: Check Idempotency Key (Redis)
-    DB-->>S: not found (new request)
-    S->>S: Validate card fields (number, expiry, CVV)
-    S->>GW: Tokenize card data
-    GW-->>S: card_token
-    S->>DB: INSERT transaction (status=pending)
-    DB-->>S: transaction_id
-    S->>GW: POST charge {token, amount, currency}
-    GW-->>S: {gateway_ref, status=success}
-    S->>DB: UPDATE transaction (status=captured)
-    S->>DB: Store Idempotency Key + response
-    DB-->>S: ok
-    S-->>C: 200 OK<br/>{transaction_id, status=captured, card_last_four}
-
-    alt Duplicate request (same Idempotency-Key)
-        C->>S: POST /api/v1/payments/charge (retry)
-        S->>DB: Check Idempotency Key
-        DB-->>S: found — cached response
-        S-->>C: 200 OK (same response, no duplicate charge)
-    end
-```
-
-##### Authorize & Capture Flow
-
-```mermaid
-sequenceDiagram
-    actor C as Client
-    participant S as Payment Service
-    participant DB as Database
-    participant GW as Payment Gateway
-
-    Note over C,GW: Step 1 — Authorize (hold funds)
-
-    C->>S: POST /api/v1/payments/authorize<br/>{card_token, amount, currency}
-    S->>S: Validate API Key + request
-    S->>DB: INSERT transaction (status=pending)
-    DB-->>S: transaction_id
-    S->>GW: POST authorize {token, amount}
-    GW-->>S: {gateway_ref, status=authorized}
-    S->>DB: UPDATE transaction (status=authorized)
-    DB-->>S: ok
-    S-->>C: 200 OK {transaction_id, status=authorized}
-
-    Note over C,GW: Step 2 — Capture (charge the card)
-
-    C->>S: POST /api/v1/payments/{transaction_id}/capture
-    S->>S: Validate API Key
-    S->>DB: GET transaction (assert status=authorized)
-    DB-->>S: transaction
-    S->>GW: POST capture {gateway_ref, amount}
-    GW-->>S: {status=captured}
-    S->>DB: UPDATE transaction (status=captured)
-    DB-->>S: ok
-    S-->>C: 200 OK {transaction_id, status=captured}
-```
-
 ##### Void / Cancel Flow
 
 ```mermaid
@@ -494,4 +427,99 @@ Content-Type: application/json
   "success": false,
   "error": "merchant current status not accepted"
 }
+```
+
+##### 5.2 Payment Charge Flow
+
+The payment service supports two transaction modes to cover real-world payment scenarios:
+• Authorize + Capture (2-step payment)
+Used when the merchant wants to hold the cardholder’s funds first (`pending → authorized`) and capture (`authorized → captured`) the payment later after confirming the order, inventory, or service.
+• Direct Charge (1-step payment)
+Used when the merchant wants to charge (`pending → captured`) the card immediately without placing a hold.
+
+The following sections describe the Authorize → Capture flow, which is commonly used in booking systems, hotel reservations, and order confirmation processes.
+
+##### 5.2.1 Authorize Flow
+
+This flow places a temporary hold on the customer’s available balance without immediately transferring funds.
+
+```mermaid
+sequenceDiagram
+    actor C as Client
+    participant S as Payment Service
+    participant GW as Payment Gateway
+    participant DB as Database
+
+    C->>S: POST /v1/payments/authorize
+    S->>S: Validate API Key + request body
+    S->>GW: Tokenize card data
+    GW-->>S: {card_token, brand, last_four}
+
+    S->>DB: INSERT transaction (status=pending)
+    DB-->>S: transaction_id
+
+    S->>GW: POST authorize {card_token, amount, currency}
+    GW-->>S: {gateway_ref, status=authorized}
+
+    S->>DB: UPDATE transaction<br/>status=authorized,<br/>gateway_ref
+    DB-->>S: ok
+
+    S-->>C: 200 OK<br/>{transaction_id, status=authorized}
+```
+
+##### 5.2.2 Capture Flow
+
+This flow completes the actual payment after a successful authorization by transferring the held amount.
+
+```mermaid
+sequenceDiagram
+    actor C as Client
+    participant S as Payment Service
+    participant GW as Payment Gateway
+    participant DB as Database
+
+    C->>S: POST /v1/payments/{transaction_id}/capture
+    S->>S: Validate API Key
+    S->>DB: GET transaction by id
+    DB-->>S: {status=authorized, gateway_ref}
+
+    alt status != authorized
+        S-->>C: 422 Unprocessable Entity
+    else status = authorized
+        S->>GW: POST capture {gateway_ref}
+        GW-->>S: {status=captured}
+
+        S->>DB: UPDATE transaction<br/>status=captured,<br/>captured_at=now()
+        DB-->>S: ok
+
+        S-->>C: 200 OK<br/>{transaction_id, status=captured}
+    end
+```
+
+##### 5.2.3 Capture Flow
+
+This flow charges the customer immediately without placing a temporary hold.
+
+```mermaid
+sequenceDiagram
+    actor C as Client
+    participant S as Payment Service
+    participant GW as Payment Gateway
+    participant DB as Database
+
+    C->>S: POST /v1/payments/charge
+    S->>S: Validate API Key + request body
+    S->>GW: Tokenize card data
+    GW-->>S: {card_token, brand, last_four}
+
+    S->>DB: INSERT transaction (status=pending)
+    DB-->>S: transaction_id
+
+    S->>GW: POST charge {card_token, amount, currency}
+    GW-->>S: {gateway_ref, status=success}
+
+    S->>DB: UPDATE transaction<br/>status=captured,<br/>gateway_ref,<br/>captured_at=now()
+    DB-->>S: ok
+
+    S-->>C: 200 OK<br/>{transaction_id, status=captured}
 ```
