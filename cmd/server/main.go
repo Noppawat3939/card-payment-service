@@ -4,6 +4,7 @@ import (
 	"card-payment-service/internal/config"
 	"card-payment-service/internal/database"
 	"card-payment-service/internal/logger"
+	"card-payment-service/internal/router"
 	"context"
 	"net/http"
 	"os"
@@ -45,12 +46,13 @@ func main() {
 	defer client.Close()
 
 	// initalize router
-	router := gin.Default()
-	router.Use(logger.GinLogger())
-	router.Use(gin.Recovery())
+	r := gin.Default()
+	r.Use(logger.GinLogger())
+	r.Use(gin.Recovery())
+	router.RegisterRoutes(r, db, client)
 
 	// create http server
-	srv := startServer(cfg.AppPort, router)
+	srv := startServer(cfg.AppPort, r)
 
 	gracefulShutdown(srv, db, client)
 }

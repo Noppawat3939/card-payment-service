@@ -107,50 +107,67 @@ pending → authorized → captured → refunded
 credit-card-payment-service/
 ├── cmd/
 │   └── server/
-│       └── main.go                  # Entry point
+│       └── main.go                  # App bootstrap + infra init
 │
 ├── internal/
 │   ├── config/
-│   │   └── config.go                # App config (env binding)
+│   │   └── config.go                # Env config + DSN helper
+│   │
+│   ├── database/
+│   │   ├── postgres.go              # GORM PostgreSQL connection
+│   │   └── redis.go                 # Redis connection
 │   │
 │   ├── logger/
-│   │   ├── logger.go                # Logger
-│   │   └── middleware.go
+│   │   ├── logger.go                # Zerolog initialization
+│   │   └── middleware.go            # Gin request logging middleware
 │   │
 │   ├── domain/
-│   │   ├── merchant.go              # Merchant entity, status, API key
-│   │   ├── payment.go               # Payment entity, value objects, status
-│   │   └── errors.go                # Domain errors
+│   │   ├── merchant.go              # Merchant entity + status
+│   │   ├── api_key.go               # API key entity
+│   │   ├── payment.go               # Payment entity + lifecycle
+│   │   └── errors.go                # Domain business errors
 │   │
 │   ├── handler/
-│   │   ├── merchant_handler.go      # Register, get key, rotate key
-│   │   ├── payment_handler.go       # HTTP handlers (charge, capture, refund, void)
-│   │   ├── webhook_handler.go       # Webhook receiver + HMAC verify
-│   │   └── playground_handler.go    # Serve embedded HTML playground (dev only)
+│   │   ├── dto/
+│   │   │   ├── merchant_dto.go      # HTTP request / response DTO
+│   │   │   └── payment_dto.go
+│   │   │
+│   │   ├── merchant_handler.go      # Merchant endpoints
+│   │   ├── payment_handler.go       # Payment endpoints
+│   │   ├── webhook_handler.go       # Webhook callback endpoints
+│   │   └── playground_handler.go    # Dev-only testing UI
 │   │
 │   ├── service/
-│   │   ├── merchant_service.go      # Merchant registration, key management
-│   │   ├── payment_service.go       # Business logic
-│   │   └── token_service.go         # Card tokenization logic
+│   │   ├── merchant_service.go      # Merchant use cases
+│   │   ├── payment_service.go       # Payment business flow
+│   │   └── token_service.go         # Tokenization flow
 │   │
 │   ├── repository/
 │   │   ├── merchant_repo.go         # Merchant DB access
-│   │   ├── payment_repo.go          # Transaction DB access
+│   │   ├── api_key_repo.go          # API key DB access
+│   │   ├── payment_repo.go          # Payment DB access
 │   │   └── token_repo.go            # Token DB access
 │   │
 │   ├── gateway/
-│   │   └── gateway_client.go        # Third-party gateway adapter
+│   │   └── gateway_client.go        # Third-party payment adapter
 │   │
-│   └── middleware/
-│       ├── auth.go                  # API Key validation + merchant status check
-│       ├── idempotency.go           # Idempotency key check (Redis)
-│       └── rate_limit.go            # Rate limiter
+│   ├── middleware/
+│   │   ├── auth.go                  # API key auth
+│   │   ├── idempotency.go           # Duplicate request protection
+│   │   └── rate_limit.go            # Rate limiting
+│   │
+│   ├── response/
+│   │   ├── response.go              # Success response formatter
+│   │   └── error.go                 # Error response mapper
+│   │
+│   └── router/
+│       └── router.go                # Route registration + dependency wiring
 │
-├── static/                          # Embedded via embed.FS (dev only)
+├── static/
 │   └── playground/
-│       ├── index.html               # Main playground UI
-│       ├── style.css                # Styles
-│       └── app.js                   # Call API, render response
+│       ├── index.html
+│       ├── style.css
+│       └── app.js
 │
 ├── migrations/
 │   ├── 000001_create_merchants.up.sql
@@ -161,7 +178,9 @@ credit-card-payment-service/
 │   └── 000003_create_tokens.down.sql
 │
 ├── .env.example
+├── .env.local
 ├── docker-compose.yml
+├── .air.toml
 ├── Makefile
 └── README.md
 ```
