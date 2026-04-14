@@ -439,7 +439,7 @@ Used when the merchant wants to charge (`pending → captured`) the card immedia
 
 The following sections describe the Authorize → Capture flow, which is commonly used in booking systems, hotel reservations, and order confirmation processes.
 
-##### 5.2.1 Authorize Flow
+##### 5.2.1 Authorize (Hold)
 
 This flow places a temporary hold on the customer’s available balance without immediately transferring funds.
 
@@ -467,7 +467,7 @@ sequenceDiagram
     S-->>C: 200 OK<br/>{transaction_id, status=authorized}
 ```
 
-##### 5.2.2 Capture Flow
+##### 5.2.2 Capture
 
 This flow completes the actual payment after a successful authorization by transferring the held amount.
 
@@ -496,7 +496,7 @@ sequenceDiagram
     end
 ```
 
-##### 5.2.3 Capture Flow
+##### 5.2.3 Capture Directly
 
 This flow charges the customer immediately without placing a temporary hold.
 
