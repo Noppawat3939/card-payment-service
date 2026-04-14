@@ -10,10 +10,10 @@ import (
 
 func NewPostgres(cfg *config.Config) (*gorm.DB, error) {
 	dsn := cfg.GetPostgreslDSN()
-	db, e := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 
-	if e != nil {
-		return nil, e
+	if err != nil {
+		return nil, err
 	}
 
 	log.Println("connected to database")
@@ -21,14 +21,14 @@ func NewPostgres(cfg *config.Config) (*gorm.DB, error) {
 }
 
 func CloseDB(db *gorm.DB) {
-	sql, e := db.DB()
-	if e != nil {
-		log.Printf("failed to get sql db for closing: %v", e)
+	sql, err := db.DB()
+	if err != nil {
+		log.Printf("failed to get sql db for closing: %v", err)
 		return
 	}
 
-	if e := sql.Close(); e != nil {
-		log.Printf("failed to close db: %v", e)
+	if err := sql.Close(); err != nil {
+		log.Printf("failed to close db: %v", err)
 		return
 	}
 }

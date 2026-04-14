@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -28,37 +29,46 @@ type RegisterOutput struct {
 type MerchantService struct {
 	merchantRepo repository.MerchantRepository
 	apiKeyRepo   repository.APIKeyRepository
+	log          zerolog.Logger
 }
 
-func NewMerchantService(merchantRepo repository.MerchantRepository, apiKeyRepo repository.APIKeyRepository) *MerchantService {
-	return &MerchantService{merchantRepo, apiKeyRepo}
+func NewMerchantService(merchantRepo repository.MerchantRepository, apiKeyRepo repository.APIKeyRepository, log zerolog.Logger) *MerchantService {
+	return &MerchantService{merchantRepo, apiKeyRepo, log}
 }
 
 func (s *MerchantService) Register(ctx context.Context, data RegisterInput) (*RegisterOutput, error) {
 	// check existing
-	existing, _ := s.merchantRepo.FindByEmail(ctx, data.Email)
+	existing, err := s.merchantRepo.FindByEmail(ctx, data.Email)
+	if err != nil {
+		s.log.Error().Str("email", data.Email).Msg("failed to find one merchant")
+		return nil, err
+	}
 	if existing != nil {
+		s.log.Warn().Str("email", data.Email).Msg("merchant already exists")
 		return nil, domain.ErrMerchantAlreadyExists
 	}
 
 	// create merchant
 	merchant := mapRegisterMerchant(data)
 
-	if e := s.merchantRepo.Create(ctx, merchant); e != nil {
-		return nil, e
+	if err := s.merchantRepo.Create(ctx, merchant); err != nil {
+		s.log.Error().Msg("failed to create a new merchant")
+		return nil, err
 	}
 
 	// generate api-key, secret and create
 	secret := generateSecret()
-	hashed, e := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
-	if e != nil {
-		return nil, e
+	hashed, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	if err != nil {
+		s.log.Error().Msg("failed to hash secret for register merchant")
+		return nil, err
 	}
 
 	apiKey := mapRegisterAPIKey(merchant, secret[:16], string(hashed))
 
-	if e := s.apiKeyRepo.Create(ctx, apiKey); e != nil {
-		return nil, e
+	if err := s.apiKeyRepo.Create(ctx, apiKey); err != nil {
+		s.log.Error().Msg("failed to create a new api-key")
+		return nil, err
 	}
 
 	return &RegisterOutput{
@@ -67,6 +77,33 @@ func (s *MerchantService) Register(ctx context.Context, data RegisterInput) (*Re
 		APISecret:  apiKey.KeyPrefix,
 		Status:     string(merchant.Status),
 	}, nil
+}
+
+func (s *MerchantService) Activate(ctx context.Context, email string) (*domain.Merchant, error) {
+	// check existing and not pending status
+	existings, err := s.merchantRepo.FindByEmail(ctx, email)
+	if err != nil {
+		s.log.Error().Str("email", email).Msg("failed to find merchant by email")
+		return nil, err
+	}
+	if existings == nil {
+		s.log.Warn().Str("email", email).Msg("merchant not found")
+		return nil, domain.ErrMerchantNotFound
+	}
+	if existings.Status != domain.MerchantStatusPending {
+		s.log.Warn().Str("email", email).Msg("current status not active")
+		return nil, domain.ErrMerchantStatusNotAccepted
+	}
+
+	// update status to active
+	values := map[string]interface{}{"status": domain.MerchantStatusActive}
+	merchant, err := s.merchantRepo.UpdateAndReturn(ctx, existings.ID, values)
+	if err != nil {
+		s.log.Error().Str("email", email).Msg("failed to update merchant by email")
+		return nil, err
+	}
+
+	return merchant, nil
 }
 
 func generateSecret() string {

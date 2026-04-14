@@ -21,14 +21,13 @@ func NewAPIKeyRepository(db *gorm.DB) APIKeyRepository {
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, data *domain.APIKey) error {
-
 	return r.db.WithContext(ctx).Create(data).Error
 }
 
 func (r *apiKeyRepository) FindByHashedKey(ctx context.Context, hashedKey string) (*domain.APIKey, error) {
 	var data domain.APIKey
-	if e := r.db.WithContext(ctx).Where("hashed_key = ?", hashedKey).First(&data).Error; e != nil {
-		return nil, e
+	if err := r.db.WithContext(ctx).Where("hashed_key = ?", hashedKey).First(&data).Error; err != nil {
+		return nil, err
 	}
 
 	return &data, nil

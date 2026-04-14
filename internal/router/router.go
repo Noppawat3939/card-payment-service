@@ -2,6 +2,7 @@ package router
 
 import (
 	"card-payment-service/internal/handler"
+	"card-payment-service/internal/logger"
 	"card-payment-service/internal/repository"
 	"card-payment-service/internal/service"
 
@@ -21,12 +22,14 @@ func registerMerchant(rg *gin.RouterGroup, db *gorm.DB) {
 	merchantRepo := repository.NewMerchantRepository(db)
 	apiKeyRepo := repository.NewAPIKeyRepository(db)
 
-	merchantService := service.NewMerchantService(merchantRepo, apiKeyRepo)
+	logger := logger.With("merchant_service")
+	merchantService := service.NewMerchantService(merchantRepo, apiKeyRepo, logger)
 
-	merchantHandler := handler.NewMerchantHandler(merchantService)
+	merchantHandler := handler.NewMerchantHandler(merchantService, logger)
 
 	merchant := rg.Group("/merchants")
 	{
 		merchant.POST("/register", merchantHandler.Register)
+		merchant.PATCH("/activate", merchantHandler.Activate)
 	}
 }

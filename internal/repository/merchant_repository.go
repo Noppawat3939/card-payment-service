@@ -6,12 +6,13 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MerchantRepository interface {
 	Create(ctx context.Context, data *domain.Merchant) error
 	FindByEmail(ctx context.Context, email string) (*domain.Merchant, error)
-	UpdateStatus(ctx context.Context, merchantID uuid.UUID, status domain.MerchantStatus) error
+	UpdateAndReturn(ctx context.Context, merchantID uuid.UUID, data interface{}) (*domain.Merchant, error)
 }
 
 type merchangeRepository struct {
@@ -29,12 +30,17 @@ func (r *merchangeRepository) Create(ctx context.Context, data *domain.Merchant)
 func (r *merchangeRepository) FindByEmail(ctx context.Context, email string) (*domain.Merchant, error) {
 	var data domain.Merchant
 
-	if e := r.db.WithContext(ctx).Where("email = ?", email).First(&data).Error; e != nil {
-		return nil, e
+	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&data).Error; err != nil {
+		return nil, err
 	}
 	return &data, nil
 }
 
-func (r *merchangeRepository) UpdateStatus(ctx context.Context, merchantID uuid.UUID, status domain.MerchantStatus) error {
-	return r.db.WithContext(ctx).Model(&domain.Merchant{}).Where("id = ?", merchantID).Update("status", status).Error
+func (r *merchangeRepository) UpdateAndReturn(ctx context.Context, merchantID uuid.UUID, values interface{}) (*domain.Merchant, error) {
+	var data domain.Merchant
+	if err := r.db.WithContext(ctx).Model(&data).Clauses(clause.Returning{}).Where("id = ?", merchantID).Updates(values).Error; err != nil {
+		return nil, err
+	}
+
+	return &data, nil
 }

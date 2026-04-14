@@ -18,8 +18,8 @@ func NewRedis(cfg *config.Config) (*redis.Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	if e := client.Ping(ctx).Err(); e != nil {
-		return nil, e
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, err
 	}
 
 	log.Println("connected to redis")

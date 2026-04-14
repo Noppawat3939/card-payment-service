@@ -12,3 +12,13 @@ type RegisterMerchantResponse struct {
 	APISecret  string `json:"api_secret"`
 	Status     string `json:"status"`
 }
+
+type UpdateMerchantStatusRequest struct {
+	Email string `json:"email" binding:"required"`
+}
+
+type UpdateMerchantStatusResponse struct {
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+	Status string `json:"status"`
+}

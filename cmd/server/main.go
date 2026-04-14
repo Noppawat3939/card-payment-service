@@ -31,17 +31,17 @@ func main() {
 	log.Info().Str("env", os.Getenv("APP_ENV")).Msg("starting server")
 
 	// connect to database
-	db, e := database.NewPostgres(cfg)
-	if e != nil {
-		log.Fatal().Err(e).Msg("failed to connect database")
+	db, err := database.NewPostgres(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect database")
 	}
 
 	defer database.CloseDB(db)
 
 	// connect to redis
-	client, e := database.NewRedis(cfg)
-	if e != nil {
-		log.Fatal().Err(e).Msg("failed to connect redis")
+	client, err := database.NewRedis(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to connect redis")
 	}
 	defer client.Close()
 

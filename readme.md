@@ -189,32 +189,6 @@ credit-card-payment-service/
 
 #### 5. Sequence Diagram Flow
 
-##### Merchant Registration Flow
-
-```mermaid
-sequenceDiagram
-    actor M as Merchant
-    participant S as Payment Service
-    participant DB as Database
-
-    M->>S: POST /merchants/register
-    S->>S: Validate request body
-    S->>DB: INSERT merchant (status=pending)
-    DB-->>S: merchant_id
-
-    S->>S: Generate API Key + Secret
-    S->>DB: INSERT api_key (hashed secret)
-    DB-->>S: ok
-
-    S-->>M: 201 Created
-    Note over M,S: api_secret shown only once
-
-    M->>S: PATCH /merchants/activate
-    S->>DB: UPDATE status=active
-    DB-->>S: ok
-    S-->>M: 200 OK
-```
-
 ##### Payment Charge Flow
 
 ```mermaid
@@ -374,3 +348,150 @@ The system is designed to integrate with any Web, Mobile, or Backend service and
 ---
 
 > **Note:** The `/dev/playground` route is only accessible when `APP_ENV=development`. It is automatically disabled in production.
+
+---
+
+#### 5. API Reference
+
+##### Base URL
+
+```text
+http://localhost:8080/v1
+```
+
+##### 5.1 Merchant Register Flow
+
+```mermaid
+sequenceDiagram
+    actor M as Merchant
+    participant S as Payment Service
+    participant DB as Database
+
+    M->>S: POST /merchants/register
+    S->>S: Validate request body
+    S->>DB: INSERT merchant (status=pending)
+    DB-->>S: merchant_id
+
+    S->>S: Generate API Key + Secret
+    S->>DB: INSERT api_key (hashed secret)
+    DB-->>S: ok
+
+    S-->>M: 201 Created
+    Note over M,S: api_secret shown only once
+
+    M->>S: PATCH /merchants/activate
+    S->>DB: UPDATE status=active
+    DB-->>S: ok
+    S-->>M: 200 OK
+```
+
+##### 5.1.1 Register Merchant
+
+Create a new merchant account and issue API credentials.
+
+```http
+POST /merchants/register
+Content-Type: application/json
+```
+
+###### Request
+
+```json
+{
+  "name": "Acme Corp",
+  "email": "ops@acme.com",
+  "webhook_url": "https://acme.com/webhook"
+}
+```
+
+###### Success Response
+
+**201 Created**
+
+```json
+{
+  "success": true,
+  "data": {
+    "merchant_id": "8f7f6d4e-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "api_key": "pk_live_xxxxxxxx",
+    "api_secret": "sk_live_xxxxxxxxxxxxx",
+    "status": "pending"
+  }
+}
+```
+
+> `api_secret` is returned **only once** and must be stored securely by the merchant.
+
+###### Error Responses
+
+**400 Bad Request**
+
+```json
+{
+  "success": false,
+  "error": "invalid request body"
+}
+```
+
+**406 Not Acceptable**
+
+```json
+{
+  "success": false,
+  "error": "merchant already exists"
+}
+```
+
+---
+
+##### 5.1.2 Activate Merchant
+
+Activate a merchant account that is currently in `pending` status.
+
+```http
+PATCH /merchants/activate
+Content-Type: application/json
+```
+
+###### Request
+
+```json
+{
+  "email": "ops@acme.com"
+}
+```
+
+###### Success Response
+
+**200 OK**
+
+```json
+{
+  "success": true,
+  "data": {
+    "name": "Acme Corp",
+    "email": "ops@acme.com",
+    "status": "active"
+  }
+}
+```
+
+###### Error Responses
+
+**404 Not Found**
+
+```json
+{
+  "success": false,
+  "error": "merchant email not found"
+}
+```
+
+**406 Not Acceptable**
+
+```json
+{
+  "success": false,
+  "error": "merchant current status not accepted"
+}
+```

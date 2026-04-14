@@ -1,6 +1,7 @@
 package response
 
 import (
+	"card-payment-service/internal/domain"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,19 @@ func Error(c *gin.Context, code int, msg string, data ...any) {
 	c.JSON(code, ErrorResponse{
 		Success: false,
 		Error:   msg,
+		Data:    respData,
+	})
+}
+
+func BadRequest(c *gin.Context, data ...any) {
+	var respData *any
+	if len(data) > 0 && data[0] != nil {
+		respData = &data[0]
+	}
+
+	c.JSON(http.StatusBadRequest, ErrorResponse{
+		Success: false,
+		Error:   domain.ErrBodyInvalid.Error(),
 		Data:    respData,
 	})
 }

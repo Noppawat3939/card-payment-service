@@ -9,36 +9,39 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
 )
 
 type MerchantHandler struct {
 	merchantService *service.MerchantService
+	log             zerolog.Logger
 }
 
-func NewMerchantHandler(merchantService *service.MerchantService) *MerchantHandler {
-	return &MerchantHandler{merchantService}
+func NewMerchantHandler(merchantService *service.MerchantService, log zerolog.Logger) *MerchantHandler {
+	return &MerchantHandler{merchantService, log}
 }
 
 func (h *MerchantHandler) Register(c *gin.Context) {
 	var req dto.RegisterMerchantRequest
 
-	if e := c.ShouldBindJSON(&req); e != nil {
-		response.Error(c, http.StatusBadRequest, domain.ErrBodyInvalid.Error())
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logErr(c, err)
+		response.BadRequest(c)
 		return
 	}
 
-	data, e := h.merchantService.Register(c, service.RegisterInput{
+	data, err := h.merchantService.Register(c, service.RegisterInput{
 		Name:       req.Name,
-		Email:      req.Name,
+		Email:      req.Email,
 		WebhookURL: req.WebhookURL,
 	})
-	if e != nil {
+	if err != nil {
 		statusCode := http.StatusInternalServerError
-		if errors.Is(e, domain.ErrMerchantAlreadyExists) {
+		if errors.Is(err, domain.ErrMerchantAlreadyExists) {
 			statusCode = http.StatusNotAcceptable
 		}
 
-		response.Error(c, statusCode, e.Error())
+		response.Error(c, statusCode, err.Error())
 		return
 	}
 
@@ -48,4 +51,38 @@ func (h *MerchantHandler) Register(c *gin.Context) {
 		MerchantID: data.MerchantID,
 		Status:     data.Status,
 	})
+}
+
+func (h *MerchantHandler) Activate(c *gin.Context) {
+	var req dto.UpdateMerchantStatusRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logErr(c, err)
+		response.BadRequest(c)
+		return
+	}
+
+	merchant, err := h.merchantService.Activate(c, req.Email)
+	if err != nil {
+		statusCode := http.StatusInternalServerError
+		if errors.Is(err, domain.ErrMerchantNotFound) {
+			statusCode = http.StatusNotFound
+		}
+		if errors.Is(err, domain.ErrMerchantStatusNotAccepted) {
+			statusCode = http.StatusNotAcceptable
+		}
+
+		response.Error(c, statusCode, err.Error())
+		return
+	}
+
+	response.OK(c, &dto.UpdateMerchantStatusResponse{
+		Name:   merchant.Name,
+		Email:  merchant.Email,
+		Status: string(merchant.Status),
+	})
+}
+
+func (h *MerchantHandler) logErr(c *gin.Context, err error) {
+	h.log.Err(err).Str("path", c.FullPath()).Msg(err.Error())
 }
