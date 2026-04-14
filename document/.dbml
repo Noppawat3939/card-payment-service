@@ -22,3 +22,38 @@ Table api_keys {
   revoked_at  timestamp   [null]
   created_at  timestamp   [not null, default: `now()`]
 }
+
+Table transactions {
+  id              uuid              [pk]
+  merchant_id     uuid              [not null, ref: > merchants.id]
+  gateway_ref     varchar(255)      [null]
+  card_token      varchar(255)      [not null]
+  card_last_four  varchar(4)        [not null]
+  card_brand      varchar(20)       [not null]
+  amount          bigint            [not null]
+  currency        varchar(3)        [not null, default: "THB"]
+  status          transaction_status [not null, default: "pending"]
+  description     varchar(500)      [null]
+  idempotency_key varchar(255)      [null, unique]
+  failed_reason   varchar(500)      [null]
+  captured_at     timestamp         [null]
+  created_at      timestamp         [not null, default: `now()`]
+  updated_at      timestamp         [not null, default: `now()`]
+}
+
+Enum transaction_status {
+  pending
+  authorized
+  captured
+  failed
+  voided
+  refunded
+}
+
+Table idempotency_keys {
+  key         varchar(255)  [pk]
+  merchant_id uuid          [not null, ref: > merchants.id]
+  response    jsonb         [not null]
+  created_at  timestamp     [not null, default: `now()`]
+  expires_at  timestamp     [not null]
+}
