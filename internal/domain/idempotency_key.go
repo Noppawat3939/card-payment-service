@@ -8,7 +8,7 @@ import (
 )
 
 type IdempotencyKey struct {
-	ID        uuid.UUID      `json:"id"`
+	Key       uuid.UUID      `json:"key"`
 	MerchatID uuid.UUID      `json:"merchant_id"`
 	Response  datatypes.JSON `json:"response"`
 	ExpiresAt time.Time      `json:"expires_at"`

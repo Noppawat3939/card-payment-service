@@ -13,19 +13,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type RegisterInput struct {
-	Name       string  `json:"name"`
-	Email      string  `json:"email"`
-	WebhookURL *string `json:"webhook_url"`
-}
-
-type RegisterOutput struct {
-	MerchantID string `json:"merchant_id"`
-	APIKey     string `json:"api_key"`
-	APISecret  string `json:"api_secret"`
-	Status     string `json:"status"`
-}
-
 type MerchantService struct {
 	merchantRepo repository.MerchantRepository
 	apiKeyRepo   repository.APIKeyRepository
@@ -34,6 +21,19 @@ type MerchantService struct {
 
 func NewMerchantService(merchantRepo repository.MerchantRepository, apiKeyRepo repository.APIKeyRepository, log zerolog.Logger) *MerchantService {
 	return &MerchantService{merchantRepo, apiKeyRepo, log}
+}
+
+type RegisterInput struct {
+	Name       string
+	Email      string
+	WebhookURL *string
+}
+
+type RegisterOutput struct {
+	MerchantID string `json:"merchant_id"`
+	APIKey     string `json:"api_key"`
+	APISecret  string `json:"api_secret"`
+	Status     string `json:"status"`
 }
 
 func (s *MerchantService) Register(ctx context.Context, data RegisterInput) (*RegisterOutput, error) {

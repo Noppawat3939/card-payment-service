@@ -450,7 +450,8 @@ sequenceDiagram
     actor C as Client
     participant S as Payment Service
     participant R as Redis
-    participant GW as Payment Gateway
+    participant GW as Gateway Adapter
+    participant PG as Payment Gateway
     participant DB as Database
 
     C->>S: POST /v1/payments/authorize<br/>Header: X-API-Key, Idempotency-Key
@@ -460,23 +461,34 @@ sequenceDiagram
     alt duplicate request
         R-->>S: cached response
         S-->>C: 200 OK (same response)
+
     else new request
         R-->>S: not found
 
         S->>GW: Tokenize card data
+        GW->>GW: Build tokenize payload
+        GW->>GW: Generate signed headers
+        GW->>PG: POST /tokenize + signed headers
+        PG-->>GW: {card_token, brand, last_four}
         GW-->>S: {card_token, brand, last_four}
 
         S->>DB: INSERT transaction<br/>status=pending
         DB-->>S: transaction_id
 
-        S->>GW: POST authorize {card_token, amount, currency}
+        S->>GW: Authorize payment {card_token, amount, currency}
+        GW->>GW: Build authorize payload
+        GW->>GW: Generate signed headers
+        GW->>PG: POST /authorize + signed headers
 
         alt gateway rejected
-            GW-->>S: {status=failed, reason=card_declined}
+            PG-->>GW: {status=failed, reason=card_declined}
+            GW-->>S: failed response
             S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
             S-->>C: 402 Payment Required
+
         else gateway success
-            GW-->>S: {gateway_ref, status=authorized}
+            PG-->>GW: {gateway_ref, status=authorized}
+            GW-->>S: success response
             S->>DB: UPDATE transaction<br/>status=authorized,<br/>gateway_ref,<br/>authorized_at=now()
             S->>R: Save Idempotency-Key + response
             S-->>C: 200 OK<br/>{transaction_id, status=authorized}

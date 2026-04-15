@@ -38,7 +38,11 @@ func (r *merchangeRepository) FindByEmail(ctx context.Context, email string) (*d
 
 func (r *merchangeRepository) UpdateAndReturn(ctx context.Context, merchantID uuid.UUID, values interface{}) (*domain.Merchant, error) {
 	var data domain.Merchant
-	if err := r.db.WithContext(ctx).Model(&data).Clauses(clause.Returning{}).Where("id = ?", merchantID).Updates(values).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Model(&data).
+		Clauses(clause.Returning{}).
+		Where("id = ?", merchantID).
+		Updates(values).Error; err != nil {
 		return nil, err
 	}
 
