@@ -449,24 +449,39 @@ This flow places a temporary hold on the customer’s available balance without 
 sequenceDiagram
     actor C as Client
     participant S as Payment Service
+    participant R as Redis
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/authorize
+    C->>S: POST /v1/payments/authorize<br/>Header: X-API-Key, Idempotency-Key
     S->>S: Validate API Key + request body
-    S->>GW: Tokenize card data
-    GW-->>S: {card_token, brand, last_four}
+    S->>R: Check Idempotency-Key
 
-    S->>DB: INSERT transaction (status=pending)
-    DB-->>S: transaction_id
+    alt duplicate request
+        R-->>S: cached response
+        S-->>C: 200 OK (same response)
+    else new request
+        R-->>S: not found
 
-    S->>GW: POST authorize {card_token, amount, currency}
-    GW-->>S: {gateway_ref, status=authorized}
+        S->>GW: Tokenize card data
+        GW-->>S: {card_token, brand, last_four}
 
-    S->>DB: UPDATE transaction<br/>status=authorized,<br/>gateway_ref
-    DB-->>S: ok
+        S->>DB: INSERT transaction<br/>status=pending
+        DB-->>S: transaction_id
 
-    S-->>C: 200 OK<br/>{transaction_id, status=authorized}
+        S->>GW: POST authorize {card_token, amount, currency}
+
+        alt gateway rejected
+            GW-->>S: {status=failed, reason=card_declined}
+            S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
+            S-->>C: 402 Payment Required
+        else gateway success
+            GW-->>S: {gateway_ref, status=authorized}
+            S->>DB: UPDATE transaction<br/>status=authorized,<br/>gateway_ref,<br/>authorized_at=now()
+            S->>R: Save Idempotency-Key + response
+            S-->>C: 200 OK<br/>{transaction_id, status=authorized}
+        end
+    end
 ```
 
 ##### 5.2.2 Capture
@@ -480,21 +495,28 @@ sequenceDiagram
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/{transaction_id}/capture
+    C->>S: POST /v1/payments/{transaction_id}/capture<br/>Header: X-API-Key
     S->>S: Validate API Key
-    S->>DB: GET transaction by id
+
+    S->>DB: GET transaction by id + merchant_id
     DB-->>S: {status=authorized, gateway_ref}
 
-    alt status != authorized
+    alt transaction not found or wrong merchant
+        S-->>C: 404 Not Found
+    else status != authorized
         S-->>C: 422 Unprocessable Entity
-    else status = authorized
+    else valid
         S->>GW: POST capture {gateway_ref}
-        GW-->>S: {status=captured}
 
-        S->>DB: UPDATE transaction<br/>status=captured,<br/>captured_at=now()
-        DB-->>S: ok
-
-        S-->>C: 200 OK<br/>{transaction_id, status=captured}
+        alt gateway rejected
+            GW-->>S: {status=failed, reason=capture_failed}
+            S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
+            S-->>C: 402 Payment Required
+        else gateway success
+            GW-->>S: {status=captured}
+            S->>DB: UPDATE transaction<br/>status=captured,<br/>captured_at=now()
+            S-->>C: 200 OK<br/>{transaction_id, status=captured}
+        end
     end
 ```
 
@@ -506,22 +528,37 @@ This flow charges the customer immediately without placing a temporary hold.
 sequenceDiagram
     actor C as Client
     participant S as Payment Service
+    participant R as Redis
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/charge
+    C->>S: POST /v1/payments/charge<br/>Header: X-API-Key, Idempotency-Key
     S->>S: Validate API Key + request body
-    S->>GW: Tokenize card data
-    GW-->>S: {card_token, brand, last_four}
+    S->>R: Check Idempotency-Key
 
-    S->>DB: INSERT transaction (status=pending)
-    DB-->>S: transaction_id
+    alt duplicate request
+        R-->>S: cached response
+        S-->>C: 200 OK (same response)
+    else new request
+        R-->>S: not found
 
-    S->>GW: POST charge {card_token, amount, currency}
-    GW-->>S: {gateway_ref, status=success}
+        S->>GW: Tokenize card data
+        GW-->>S: {card_token, brand, last_four}
 
-    S->>DB: UPDATE transaction<br/>status=captured,<br/>gateway_ref,<br/>captured_at=now()
-    DB-->>S: ok
+        S->>DB: INSERT transaction<br/>status=pending
+        DB-->>S: transaction_id
 
-    S-->>C: 200 OK<br/>{transaction_id, status=captured}
+        S->>GW: POST charge {card_token, amount, currency}
+
+        alt gateway rejected
+            GW-->>S: {status=failed, reason=insufficient_funds}
+            S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
+            S-->>C: 402 Payment Required
+        else gateway success
+            GW-->>S: {gateway_ref, status=success}
+            S->>DB: UPDATE transaction<br/>status=captured,<br/>gateway_ref,<br/>captured_at=now()
+            S->>R: Save Idempotency-Key + response
+            S-->>C: 200 OK<br/>{transaction_id, status=captured}
+        end
+    end
 ```
