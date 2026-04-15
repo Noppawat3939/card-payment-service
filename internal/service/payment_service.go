@@ -85,13 +85,14 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	}
 
 	// call gateway
-	resp, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
+	gwResp, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
 		Amount:   tx.Amount,
 		Currency: tx.Currency,
 		OrderID:  tx.ID.String(),
 	})
 
 	var failedReason *string
+	var gatewayRef *string
 	updateStatus := domain.TransactionStatusAuthorized
 
 	if err != nil {
@@ -103,16 +104,20 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 		failedReason = &msg
 	}
 
-	if resp == nil {
+	if gwResp == nil {
 		s.log.Warn().
 			Str("transaction_id", tx.ID.String()).
 			Msg("calling to gateway and response is empty")
 		updateStatus = domain.TransactionStatusFailed
 		failedReason = nil
+	} else {
+		gatewayRef = &gwResp.GatewayRef
 	}
 
 	// update transaction
-	updated, err := s.txRepo.UpdateAndReturn(ctx, tx.ID, &domain.Transaction{Status: updateStatus, FailedReason: failedReason})
+	updated, err := s.txRepo.UpdateAndReturn(
+		ctx, tx.ID, &domain.Transaction{Status: updateStatus, FailedReason: failedReason, GatewayRef: gatewayRef},
+	)
 	if err != nil {
 		s.log.Error().Err(err).Str("transaction_id", tx.ID.String()).Msg("failed to update transaction")
 		return nil, err
