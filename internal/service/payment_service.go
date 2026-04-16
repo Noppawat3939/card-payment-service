@@ -6,6 +6,7 @@ import (
 	"card-payment-service/internal/repository"
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,24 +16,24 @@ import (
 type PaymentService struct {
 	txRepo   repository.TransactionRepository
 	idemRepo repository.IdempotencyKeyRepository
-	log      zerolog.Logger
 	gateway  gateway.Gateway
+	log      zerolog.Logger
 }
 
-func NewPaymentService(txRepo repository.TransactionRepository, idemRepo repository.IdempotencyKeyRepository, log zerolog.Logger, gateway gateway.Gateway) *PaymentService {
-	return &PaymentService{txRepo, idemRepo, log, gateway}
+func NewPaymentService(txRepo repository.TransactionRepository, idemRepo repository.IdempotencyKeyRepository, gateway gateway.Gateway, log zerolog.Logger) *PaymentService {
+	return &PaymentService{txRepo, idemRepo, gateway, log}
 }
 
 type AuthorizeInput struct {
-	MerchantID     uuid.UUID
-	IdempotencyKey string
+	Amount         int64
 	CardNumber     string
+	Currency       string
+	CVV            string
+	Description    *string
 	ExpiryMonth    string
 	ExpiryYear     string
-	CVV            string
-	Amount         int64
-	Currency       string
-	Description    *string
+	IdempotencyKey string
+	MerchantID     uuid.UUID
 }
 
 type AuthorizeOutput struct {
@@ -61,9 +62,10 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 		ExpiryMonth: data.ExpiryMonth,
 		ExpiryYear:  data.ExpiryYear,
 	})
+
 	if err != nil {
 		log.Error().Err(err).Msg("failed to tokenize card")
-		return nil, err
+		return nil, domain.ErrTokenizeCard
 	}
 
 	// insert transaction (pending)
@@ -111,7 +113,9 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	}
 
 	// save idempotency cache
-	s.saveIdempotency(ctx, idemKeyID, data.MerchantID, out, log)
+	if err = s.saveIdempotency(ctx, idemKeyID, data.MerchantID, out, log); err != nil {
+		return nil, err
+	}
 
 	if status == domain.TransactionStatusFailed {
 		return out, domain.ErrGatewayRejected
@@ -122,6 +126,7 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 
 func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID) (*AuthorizeOutput, bool) {
 	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
+	fmt.Println("idem", idem, "key", key)
 	if err != nil || idem == nil {
 		return nil, false
 	}
@@ -158,10 +163,10 @@ func (s *PaymentService) saveIdempotency(ctx context.Context, idemKey, merchantI
 	}
 
 	if err = s.idemRepo.Create(ctx, &domain.IdempotencyKey{
-		Key:       idemKey,
-		MerchatID: merchantID,
-		Response:  raw,
-		ExpiresAt: time.Now().Add(24 * time.Hour), // 1d
+		Key:        idemKey,
+		MerchantID: merchantID,
+		Response:   raw,
+		ExpiresAt:  time.Now().Add(24 * time.Hour), // 1d
 	}); err != nil {
 		log.Warn().Err(err).Msg("failed to create idempotency key")
 		return err

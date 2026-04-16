@@ -57,3 +57,10 @@ func BadRequest(c *gin.Context, data ...any) {
 		Data:    respData,
 	})
 }
+
+func Unauthorized(c *gin.Context, msg string) {
+	c.JSON(http.StatusUnauthorized, ErrorResponse{
+		Success: false,
+		Error:   msg,
+	})
+}

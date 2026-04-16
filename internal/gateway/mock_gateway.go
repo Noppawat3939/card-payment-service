@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"slices"
 
 	creditcard "github.com/durango/go-credit-card"
 	"github.com/google/uuid"
@@ -26,16 +27,12 @@ func (m *MockGateway) Refund(ctx context.Context, gatewayRef string) error {
 }
 
 func (*MockGateway) TokenizeCard(ctx context.Context, req TokenizeRequest) (*TokenizeResponse, error) {
-	card := creditcard.Card{Number: req.CardNumber}
+	card := creditcard.Card{Number: req.CardNumber, Cvv: req.CVV, Month: req.ExpiryMonth, Year: req.ExpiryYear}
+	testNumbers := []string{"4242424242424242"}
+	allowed := slices.Contains(testNumbers, card.Number)
 
 	// validation card number
-	if err := card.Validate(); err != nil {
-		return nil, err
-	}
-	if err := card.ValidateExpiration(); err != nil {
-		return nil, err
-	}
-	if err := card.ValidateCVV(); err != nil {
+	if err := card.Validate(allowed); err != nil {
 		return nil, err
 	}
 

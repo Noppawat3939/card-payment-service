@@ -24,7 +24,15 @@ func NewTransactionRepository(db *gorm.DB) TransactionRepository {
 }
 
 func (r *transactionRepository) Create(ctx context.Context, data *domain.Transaction) error {
-	return r.db.WithContext(ctx).Create(data).Error
+	err := r.db.WithContext(ctx).Create(data).Error
+	if err != nil {
+		if IsPostgresCode(err, PgForeignKeyViolation) {
+			return domain.ErrDuplicateIdempotencyKey
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (r *transactionRepository) FindByMerchantIDAndIdKey(ctx context.Context, merchantID, idempotencyKey uuid.UUID) (*domain.Transaction, error) {

@@ -28,7 +28,11 @@ func (r *idempotencyKeyRepository) Create(ctx context.Context, data *domain.Idem
 func (r *idempotencyKeyRepository) FindByKeyAndMerchantID(ctx context.Context, key, merchantID uuid.UUID) (*domain.IdempotencyKey, error) {
 	var data domain.IdempotencyKey
 
-	if err := r.db.WithContext(ctx).Where(map[string]any{"key": key, "merchant_id": merchantID}).First(&data).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where("key = ?", key).
+		Where("merchant_id = ?", merchantID).
+		Where("expires_at > NOW()").
+		First(&data).Error; err != nil {
 		return nil, err
 	}
 

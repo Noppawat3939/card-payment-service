@@ -8,4 +8,6 @@ var (
 	ErrMerchantNotFound          = errors.New("merchant email not found")
 	ErrMerchantStatusNotAccepted = errors.New("merchant current status not accepted")
 	ErrGatewayRejected           = errors.New("gateway request rejected")
+	ErrTokenizeCard              = errors.New("card information invalid")
+	ErrDuplicateIdempotencyKey   = errors.New("idempotency key is duplicated")
 )

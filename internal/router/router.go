@@ -1,8 +1,10 @@
 package router
 
 import (
+	"card-payment-service/internal/gateway"
 	"card-payment-service/internal/handler"
 	"card-payment-service/internal/logger"
+	"card-payment-service/internal/middleware"
 	"card-payment-service/internal/repository"
 	"card-payment-service/internal/service"
 
@@ -13,9 +15,10 @@ import (
 
 func RegisterRoutes(r *gin.Engine, db *gorm.DB, redis *redis.Client) {
 	// versioning
-	version := r.Group("/v1")
+	v1 := r.Group("/v1")
 
-	registerMerchant(version, db)
+	registerMerchant(v1, db)
+	registerPayment(v1, db)
 }
 
 func registerMerchant(rg *gin.RouterGroup, db *gorm.DB) {
@@ -32,4 +35,22 @@ func registerMerchant(rg *gin.RouterGroup, db *gorm.DB) {
 		merchant.POST("/register", merchantHandler.Register)
 		merchant.PATCH("/activate", merchantHandler.Activate)
 	}
+}
+
+func registerPayment(rg *gin.RouterGroup, db *gorm.DB) {
+	logger := logger.With("payment_service")
+
+	txRepo := repository.NewTransactionRepository(db)
+	idemRepo := repository.NewIdempotencyKeyRepository(db)
+	gateway := gateway.NewMockGateway()
+
+	paymentService := service.NewPaymentService(txRepo, idemRepo, gateway, logger)
+
+	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
+
+	payment := rg.Group("/payments")
+	{
+		payment.POST("/authorize", middleware.MerchantAuth(), middleware.RequireIdempotencyKey(), paymentHandler.Authorize)
+	}
+
 }
