@@ -4,7 +4,6 @@ import (
 	"card-payment-service/internal/domain"
 	"card-payment-service/internal/gateway"
 	"card-payment-service/internal/repository"
-	uuidUtil "card-payment-service/pkg/uuid"
 	"context"
 	"encoding/json"
 	"time"
@@ -43,33 +42,39 @@ type AuthorizeOutput struct {
 }
 
 func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*AuthorizeOutput, error) {
+	log := s.log.With().
+		Str("merchant_id", data.MerchantID.String()).
+		Str("idem_key", data.IdempotencyKey).
+		Logger()
+
 	// check duplicate idempotency key then return cached
-	idemKey, err := s.idemRepo.FindByKeyAndMerchantID(ctx, *uuidUtil.ParseUUID(data.IdempotencyKey), data.MerchantID)
-	if err == nil && idemKey != nil {
-		s.log.Warn().Str("merchant_id", data.MerchantID.String()).Str("idem_key", data.IdempotencyKey).Msg("idempotency duplicated")
-
-		var out AuthorizeOutput
-		if err := json.Unmarshal(idemKey.Response, &out); err != nil {
-			s.log.Error().Err(err).Msg("failed to unmarshal idempotency response")
-			return nil, err
-		}
-
-		return &out, nil
+	idemKeyID := uuid.MustParse(data.IdempotencyKey)
+	if cached, ok := s.cachedIdempotency(ctx, idemKeyID, data.MerchantID); ok {
+		log.Warn().Msg("duplicate idempotency key — returning cached response")
+		return cached, nil
 	}
 
 	// tokenize card (mock)
-	cardToken := "tok_" + uuid.NewString()
-	lastFour := data.CardNumber[len(data.CardNumber)-4:]
+	tokenResp, err := s.gateway.TokenizeCard(ctx, gateway.TokenizeRequest{
+		CardNumber:  data.CardNumber,
+		CVV:         data.CVV,
+		ExpiryMonth: data.ExpiryMonth,
+		ExpiryYear:  data.ExpiryYear,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("failed to tokenize card")
+		return nil, err
+	}
 
-	// insert transaction pending
+	// insert transaction (pending)
 	tx := &domain.Transaction{
 		ID:             uuid.New(),
 		MerchantID:     data.MerchantID,
 		PaymentType:    domain.AuthorizeCapture,
 		Status:         domain.TransactionStatusPending,
-		CardToken:      cardToken,
-		CardLastFour:   lastFour,
-		CardBrand:      "VISA",
+		CardToken:      tokenResp.CardToken,
+		CardLastFour:   tokenResp.LastFour,
+		CardBrand:      tokenResp.Brand,
 		Amount:         data.Amount,
 		Currency:       data.Currency,
 		Description:    data.Description,
@@ -77,75 +82,90 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	}
 
 	if err := s.txRepo.Create(ctx, tx); err != nil {
-		s.log.Error().Err(err).
-			Str("merchant_id", data.MerchantID.String()).
-			Str("idem_key", data.IdempotencyKey).
-			Msg("failed to create a new transaction")
+		log.Error().Err(err).Msg("failed to create transaction")
 		return nil, err
 	}
 
+	log = log.With().Str("transaction_id", tx.ID.String()).Logger()
+
 	// call gateway
-	gwResp, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
-		Amount:   tx.Amount,
-		Currency: tx.Currency,
-		OrderID:  tx.ID.String(),
-	})
-
-	var failedReason *string
-	var gatewayRef *string
-	updateStatus := domain.TransactionStatusAuthorized
-
-	if err != nil {
-		s.log.Error().Err(err).
-			Str("transaction_id", tx.ID.String()).
-			Msg("failed to call gateway")
-		updateStatus = domain.TransactionStatusFailed
-		msg := err.Error()
-		failedReason = &msg
-	}
-
-	if gwResp == nil {
-		s.log.Warn().
-			Str("transaction_id", tx.ID.String()).
-			Msg("calling to gateway and response is empty")
-		updateStatus = domain.TransactionStatusFailed
-		failedReason = nil
-	} else {
-		gatewayRef = &gwResp.GatewayRef
-	}
+	status, gwRef, reason := s.callGatewayAuthorize(ctx, tx, log)
 
 	// update transaction
 	updated, err := s.txRepo.UpdateAndReturn(
-		ctx, tx.ID, &domain.Transaction{Status: updateStatus, FailedReason: failedReason, GatewayRef: gatewayRef},
+		ctx, tx.ID, &domain.Transaction{
+			Status:       status,
+			FailedReason: reason,
+			GatewayRef:   gwRef,
+		},
 	)
 	if err != nil {
-		s.log.Error().Err(err).Str("transaction_id", tx.ID.String()).Msg("failed to update transaction")
+		log.Error().Err(err).Msg("failed to update transaction")
 		return nil, err
 	}
 
-	// save idempotency cache
 	out := &AuthorizeOutput{
 		TransactionID: updated.ID,
 		Status:        string(updated.Status),
 		CreatedAt:     tx.CreatedAt,
 	}
 
-	json, err := json.Marshal(out)
-	if err != nil {
-		s.log.Error().Err(err).Msg("failed to marshall authorize output")
-		return nil, err
-	}
+	// save idempotency cache
+	s.saveIdempotency(ctx, idemKeyID, data.MerchantID, out, log)
 
-	err = s.idemRepo.Create(ctx, &domain.IdempotencyKey{
-		Key:       *uuidUtil.ParseUUID(data.IdempotencyKey),
-		MerchatID: data.MerchantID,
-		Response:  json,
-		ExpiresAt: time.Now().Add(24 * time.Hour), // 1d
-	})
-	if err != nil {
-		s.log.Error().Err(err).Msg("failed to create a new idempotency key")
-		return nil, err
+	if status == domain.TransactionStatusFailed {
+		return out, domain.ErrGatewayRejected
 	}
 
 	return out, nil
+}
+
+func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID) (*AuthorizeOutput, bool) {
+	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
+	if err != nil || idem == nil {
+		return nil, false
+	}
+
+	var out AuthorizeOutput
+	if err := json.Unmarshal(idem.Response, &out); err != nil {
+		s.log.Error().Err(err).Msg("failed to unmarshal idempotency response")
+		return nil, false
+	}
+
+	return &out, true
+}
+
+func (s *PaymentService) callGatewayAuthorize(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, gatewayRef, failedReason *string) {
+	gw, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
+		Amount:   tx.Amount,
+		Currency: tx.Currency,
+		OrderID:  tx.ID.String(),
+	})
+	if err != nil || gw == nil {
+		log.Error().Err(err).Msg("failed to authorize gateway")
+		reason := err.Error()
+		return domain.TransactionStatusFailed, nil, &reason
+	}
+
+	return domain.TransactionStatusAuthorized, &gw.GatewayRef, nil
+}
+
+func (s *PaymentService) saveIdempotency(ctx context.Context, idemKey, merchantID uuid.UUID, out *AuthorizeOutput, log zerolog.Logger) error {
+	raw, err := json.Marshal(out)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to json marshall output")
+		return err
+	}
+
+	if err = s.idemRepo.Create(ctx, &domain.IdempotencyKey{
+		Key:       idemKey,
+		MerchatID: merchantID,
+		Response:  raw,
+		ExpiresAt: time.Now().Add(24 * time.Hour), // 1d
+	}); err != nil {
+		log.Warn().Err(err).Msg("failed to create idempotency key")
+		return err
+	}
+
+	return nil
 }
