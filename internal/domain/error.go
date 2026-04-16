@@ -14,8 +14,16 @@ var (
 	// payments
 	ErrDuplicateIdempotencyKey  = errors.New("idempotency key is duplicated")
 	ErrGatewayRejected          = errors.New("gateway request rejected")
+	ErrInvalidGatewayRef        = errors.New("invalid gateway reference")
 	ErrTokenizeCard             = errors.New("card information invalid")
 	ErrTransactionNotCapturable = errors.New("transaction status not capturable")
 	ErrTransactionNotFound      = errors.New("transaction not found")
-	ErrInvalidGatewayRef        = errors.New("invalid gateway reference")
+
+	// gateway (mock)
+	ErrCardAmoutInvalid  = errors.New("amount invalid")
+	ErrCardCaptureFailed = errors.New("capture failed")
+	ErrCardDeclinded     = errors.New("card declined")
+	ErrCardInforInvalid  = errors.New("card information invalid")
+	ErrExpiredCard       = errors.New("expired_card")
+	ErrInsufficientFunds = errors.New("insufficient funds")
 )

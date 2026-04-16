@@ -51,6 +51,6 @@ func registerPayment(rg *gin.RouterGroup, db *gorm.DB) {
 	payment := rg.Group("/payments")
 	{
 		payment.POST("/authorize", middleware.MerchantAuth(), middleware.RequireIdempotencyKey(), paymentHandler.Authorize)
+		payment.POST("/:transaction_id/capture", middleware.MerchantAuth(), paymentHandler.Capture)
 	}
-
 }

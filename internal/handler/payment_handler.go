@@ -58,6 +58,39 @@ func (h *PaymentHandler) Authorize(c *gin.Context) {
 	})
 }
 
+func (h *PaymentHandler) Capture(c *gin.Context) {
+	transactionIDStr := c.Param("transaction_id")
+	if transactionIDStr == "" {
+		h.logErr(c, errors.New("missing transaction_id"))
+		response.BadRequest(c)
+		return
+	}
+	transactionID, err := uuid.Parse(transactionIDStr)
+	if err != nil {
+		h.logErr(c, err)
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	merchantID := c.MustGet(middleware.MerchantIDKey).(uuid.UUID)
+
+	data, err := h.paymentService.Capture(c, service.CaptureInput{
+		TransactionID: transactionID,
+		MerchantID:    merchantID,
+	})
+	if err != nil {
+		statusCode := mapPaymentErrStatusCode(err)
+		response.Error(c, statusCode, err.Error())
+		return
+	}
+
+	response.OK(c, &dto.CapturePaymentResponse{
+		TransactionID: data.TransactionID.String(),
+		Status:        data.Status,
+		CapturedAt:    data.CapturedAt.Format("2006-01-02T15:04:05Z07:00"),
+	})
+}
+
 func (h *PaymentHandler) logErr(c *gin.Context, err error) {
 	h.log.Err(err).Str("path", c.FullPath()).Msg(err.Error())
 }
@@ -69,6 +102,13 @@ func mapPaymentErrStatusCode(err error) int {
 	case errors.Is(err, domain.ErrDuplicateIdempotencyKey):
 		return http.StatusConflict
 	case errors.Is(err, domain.ErrGatewayRejected):
+		return http.StatusPaymentRequired
+	case errors.Is(err, domain.ErrCardInforInvalid),
+		errors.Is(err, domain.ErrCardAmoutInvalid),
+		errors.Is(err, domain.ErrCardCaptureFailed),
+		errors.Is(err, domain.ErrCardDeclinded),
+		errors.Is(err, domain.ErrExpiredCard),
+		errors.Is(err, domain.ErrInsufficientFunds):
 		return http.StatusPaymentRequired
 	default:
 		return http.StatusInternalServerError

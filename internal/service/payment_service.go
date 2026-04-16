@@ -94,7 +94,7 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	status, gwRef, reason := s.callGatewayAuthorize(ctx, tx, log)
 
 	// update transaction
-	updated, err := s.txRepo.UpdateAndReturn(
+	updated, err := s.txRepo.UpdateAndReturn( // TODO: handle concurrency
 		ctx, tx.ID, &domain.Transaction{
 			Status:       status,
 			FailedReason: reason,
@@ -136,7 +136,10 @@ type CaptureOutput struct {
 }
 
 func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*CaptureOutput, error) {
-	log := s.log.With().Str("merchant_id", data.MerchantID.String()).Str("transaction_id", data.TransactionID.String()).Logger()
+	log := s.log.With().
+		Str("merchant_id", data.MerchantID.String()).
+		Str("transaction_id", data.TransactionID.String()).
+		Logger()
 
 	// check transaction authorized and gateway_ref not null
 	tx, err := s.getTxAuthorized(ctx, data.TransactionID, data.MerchantID, log)
@@ -157,7 +160,7 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 		payload.CapturedAt = &now
 	}
 
-	updated, err := s.txRepo.UpdateAndReturn(ctx, tx.ID, payload)
+	updated, err := s.txRepo.UpdateAndReturn(ctx, tx.ID, payload) // TODO: handle concurrency
 	if err != nil {
 		log.Error().Err(err).Msg("failed update transaction")
 		return nil, err

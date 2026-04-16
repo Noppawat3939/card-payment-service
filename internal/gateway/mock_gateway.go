@@ -1,10 +1,9 @@
 package gateway
 
 import (
+	"card-payment-service/internal/domain"
 	"context"
-	"errors"
 	"os"
-	"slices"
 	"strings"
 
 	creditcard "github.com/durango/go-credit-card"
@@ -19,22 +18,18 @@ func NewMockGateway() Gateway {
 
 func (m *MockGateway) Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error) {
 	if req.Amount <= 0 {
-		return nil, errors.New("amount invalid")
+		return nil, domain.ErrCardAmoutInvalid
+	}
+	if req.OrderID == "" || req.Currency == "" || len(req.Currency) != 3 {
+		return nil, domain.ErrCardInforInvalid
 	}
 	// simulate declined card
 	if req.Amount == 99999 {
-		return nil, errors.New("card_declined")
+		return nil, domain.ErrCardDeclinded
 	}
 	// simulate insufficient funds
 	if req.Amount == 9999 {
-		return nil, errors.New("insufficient_funds")
-	}
-
-	if req.OrderID == "" {
-		return nil, errors.New("order_id is required")
-	}
-	if req.Currency == "" || len(req.Currency) != 3 {
-		return nil, errors.New("currency invalid")
+		return nil, domain.ErrInsufficientFunds
 	}
 
 	return &AuthorizeResponse{
@@ -45,11 +40,11 @@ func (m *MockGateway) Authorize(ctx context.Context, req AuthorizeRequest) (*Aut
 
 func (m *MockGateway) Capture(ctx context.Context, req CaptureRequest) (*CaptureResponse, error) {
 	if req.GatewayRef == "" {
-		return nil, errors.New("missing gateway reference")
+		return nil, domain.ErrInvalidGatewayRef
 	}
 	// simulate rejected
 	if strings.Contains(req.GatewayRef, "FAIL") {
-		return nil, errors.New("capture_failed")
+		return nil, domain.ErrCardCaptureFailed
 	}
 	// simulate timeout
 	if strings.Contains(req.GatewayRef, "TIMEOUT") {
@@ -67,15 +62,41 @@ func (m *MockGateway) Refund(ctx context.Context, gatewayRef string) error {
 }
 
 func (*MockGateway) TokenizeCard(ctx context.Context, req TokenizeRequest) (*TokenizeResponse, error) {
-	card := creditcard.Card{Number: req.CardNumber, Cvv: req.CVV, Month: req.ExpiryMonth, Year: req.ExpiryYear}
-	testNumbers := []string{"4242424242424242"} // TODO: move to whitelist later
+	card := creditcard.Card{
+		Number: req.CardNumber,
+		Cvv:    req.CVV,
+		Month:  req.ExpiryMonth,
+		Year:   req.ExpiryYear,
+	}
+
 	isDev := os.Getenv("APP_ENV") == "develop"
-	allowed := slices.Contains(testNumbers, card.Number) && isDev
+
+	if isDev {
+		if scenario, ok := GetTestCardScenario(req.CardNumber); ok {
+			switch scenario {
+			case CardScenarioDeclined:
+				return nil, domain.ErrCardDeclinded
+			case CardScenarioInsufficientFunds:
+				return nil, domain.ErrInsufficientFunds
+			case CardScenarioExpired:
+				return nil, domain.ErrExpiredCard
+			case CardScenarioSuccess:
+				return buildSuccessResponse(req.CardNumber)
+			}
+		}
+
+	}
 
 	// validation card number
-	if err := card.Validate(allowed); err != nil {
+	if err := card.Validate(false); err != nil {
 		return nil, err
 	}
+
+	return buildSuccessResponse(card.Number)
+}
+
+func buildSuccessResponse(cardNumber string) (*TokenizeResponse, error) {
+	card := creditcard.Card{Number: cardNumber}
 
 	lastFour, err := card.LastFour()
 	if err != nil {
