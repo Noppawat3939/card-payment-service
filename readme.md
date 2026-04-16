@@ -507,7 +507,7 @@ sequenceDiagram
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/{transaction_id}/capture<br/>Header: X-API-Key
+    C->>S: POST /v1/payments/{transaction_id}/capture<br/>Header: X-Merchant-ID
     S->>S: Validate API Key
 
     S->>DB: GET transaction by id + merchant_id
@@ -544,7 +544,7 @@ sequenceDiagram
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/charge<br/>Header: X-API-Key, Idempotency-Key
+    C->>S: POST /v1/payments/charge<br/>Header: X-Merchant-ID, Idempotency-Key
     S->>S: Validate API Key + request body
     S->>R: Check Idempotency-Key
 

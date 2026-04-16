@@ -26,9 +26,19 @@ type TokenizeResponse struct {
 	Brand     string
 }
 
+type CaptureRequest struct {
+	GatewayRef string
+	OrderID    string
+}
+
+type CaptureResponse struct {
+	Status     string
+	GatewayRef string
+}
+
 type Gateway interface {
 	Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error)
-	Capture(ctx context.Context, gatewayRef string) error
+	Capture(ctx context.Context, req CaptureRequest) (*CaptureResponse, error)
 	Refund(ctx context.Context, gatewayRef string) error
 	TokenizeCard(ctx context.Context, req TokenizeRequest) (*TokenizeResponse, error)
 }

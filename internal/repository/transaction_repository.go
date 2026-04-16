@@ -11,7 +11,7 @@ import (
 
 type TransactionRepository interface {
 	Create(ctx context.Context, data *domain.Transaction) error
-	FindByMerchantIDAndIdKey(ctx context.Context, merchantID, idempotencyKey uuid.UUID) (*domain.Transaction, error)
+	FindByIDAndMerchantID(ctx context.Context, id, merchantID uuid.UUID) (*domain.Transaction, error)
 	UpdateAndReturn(ctx context.Context, id uuid.UUID, values interface{}) (*domain.Transaction, error)
 }
 
@@ -35,10 +35,13 @@ func (r *transactionRepository) Create(ctx context.Context, data *domain.Transac
 	return nil
 }
 
-func (r *transactionRepository) FindByMerchantIDAndIdKey(ctx context.Context, merchantID, idempotencyKey uuid.UUID) (*domain.Transaction, error) {
+func (r *transactionRepository) FindByIDAndMerchantID(ctx context.Context, id, merchantID uuid.UUID) (*domain.Transaction, error) {
 	var data domain.Transaction
 
-	if err := r.db.WithContext(ctx).Where(map[string]any{"merchant_id": merchantID, "idempotency_key": idempotencyKey}).First(&data).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		Where("merchant_id = ?", merchantID).
+		First(&data).Error; err != nil {
 		return nil, err
 	}
 	return &data, nil

@@ -46,7 +46,7 @@ func (h *PaymentHandler) Authorize(c *gin.Context) {
 		MerchantID:     merchantID,
 	})
 	if err != nil {
-		statusCode := mapPaymentError(err)
+		statusCode := mapPaymentErrStatusCode(err)
 		response.Error(c, statusCode, err.Error())
 		return
 	}
@@ -62,7 +62,7 @@ func (h *PaymentHandler) logErr(c *gin.Context, err error) {
 	h.log.Err(err).Str("path", c.FullPath()).Msg(err.Error())
 }
 
-func mapPaymentError(err error) int {
+func mapPaymentErrStatusCode(err error) int {
 	switch {
 	case errors.Is(err, domain.ErrTokenizeCard):
 		return http.StatusNotAcceptable

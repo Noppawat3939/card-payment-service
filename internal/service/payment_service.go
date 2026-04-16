@@ -124,6 +124,58 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	return out, nil
 }
 
+type CaptureInput struct {
+	TransactionID uuid.UUID
+	MerchantID    uuid.UUID
+}
+
+type CaptureOutput struct {
+	TransactionID uuid.UUID `json:"transaction_id"`
+	Status        string    `json:"status"`
+	CapturedAt    time.Time `json:"captured_at"`
+}
+
+func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*CaptureOutput, error) {
+	log := s.log.With().Str("merchant_id", data.MerchantID.String()).Str("transaction_id", data.TransactionID.String()).Logger()
+
+	// check transaction authorized and gateway_ref not null
+	tx, err := s.getTxAuthorized(ctx, data.TransactionID, data.MerchantID, log)
+	if err != nil {
+		return nil, err
+	}
+
+	// call gateway
+	status, reason := s.callGatewayCapture(ctx, tx, log)
+
+	// update transaction
+	payload := &domain.Transaction{
+		Status:       status,
+		FailedReason: reason,
+	}
+	if status == domain.TransactionStatusCaptured {
+		now := time.Now()
+		payload.CapturedAt = &now
+	}
+
+	updated, err := s.txRepo.UpdateAndReturn(ctx, tx.ID, payload)
+	if err != nil {
+		log.Error().Err(err).Msg("failed update transaction")
+		return nil, err
+	}
+
+	out := &CaptureOutput{
+		TransactionID: updated.ID,
+		Status:        string(updated.Status),
+		CapturedAt:    *updated.CapturedAt,
+	}
+
+	if status == domain.TransactionStatusFailed {
+		return out, domain.ErrGatewayRejected
+	}
+
+	return out, nil
+}
+
 func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID) (*AuthorizeOutput, bool) {
 	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
 	fmt.Println("idem", idem, "key", key)
@@ -173,4 +225,41 @@ func (s *PaymentService) saveIdempotency(ctx context.Context, idemKey, merchantI
 	}
 
 	return nil
+}
+
+func (s *PaymentService) getTxAuthorized(ctx context.Context, id, merchantID uuid.UUID, log zerolog.Logger) (*domain.Transaction, error) {
+	tx, err := s.txRepo.FindByIDAndMerchantID(ctx, id, merchantID)
+	if err != nil {
+		log.Error().Err(err).Msg("failed find one transaction")
+		return nil, domain.ErrTransactionNotFound
+	}
+	if tx.GatewayRef == nil || *tx.GatewayRef == "" {
+		log.Warn().Msg("invalid gateway_ref")
+		return nil, domain.ErrInvalidGatewayRef
+	}
+	if tx.Status != domain.TransactionStatusAuthorized {
+		log.Warn().Msg("status not authorized")
+		return nil, domain.ErrTransactionNotCapturable
+	}
+
+	return tx, nil
+}
+
+func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, failedReason *string) {
+	resp, err := s.gateway.Capture(ctx, gateway.CaptureRequest{
+		OrderID:    tx.ID.String(),
+		GatewayRef: *tx.GatewayRef,
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("failed to capture gateway")
+		reason := err.Error()
+		return domain.TransactionStatusFailed, &reason
+	}
+	if resp == nil {
+		log.Error().Err(err).Msg("gateway returned empty response")
+		reason := "empty gateway response"
+		return domain.TransactionStatusFailed, &reason
+	}
+
+	return domain.TransactionStatusCaptured, nil
 }
