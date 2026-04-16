@@ -18,9 +18,18 @@ func NewMockGateway() Gateway {
 }
 
 func (m *MockGateway) Authorize(ctx context.Context, req AuthorizeRequest) (*AuthorizeResponse, error) {
-	if req.Amount < 0 {
+	if req.Amount <= 0 {
 		return nil, errors.New("amount invalid")
 	}
+	// simulate declined card
+	if req.Amount == 99999 {
+		return nil, errors.New("card_declined")
+	}
+	// simulate insufficient funds
+	if req.Amount == 9999 {
+		return nil, errors.New("insufficient_funds")
+	}
+
 	if req.OrderID == "" {
 		return nil, errors.New("order_id is required")
 	}
@@ -38,9 +47,15 @@ func (m *MockGateway) Capture(ctx context.Context, req CaptureRequest) (*Capture
 	if req.GatewayRef == "" {
 		return nil, errors.New("missing gateway reference")
 	}
+	// simulate rejected
 	if strings.Contains(req.GatewayRef, "FAIL") {
 		return nil, errors.New("capture_failed")
 	}
+	// simulate timeout
+	if strings.Contains(req.GatewayRef, "TIMEOUT") {
+		return nil, context.DeadlineExceeded
+	}
+
 	return &CaptureResponse{
 		Status:     "captured",
 		GatewayRef: req.GatewayRef,
