@@ -7,6 +7,7 @@ import (
 	"card-payment-service/internal/repository"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,7 +58,6 @@ type CaptureInput struct {
 type CaptureOutput struct {
 	TransactionID uuid.UUID `json:"transaction_id"`
 	Status        string    `json:"status"`
-	CapturedAt    time.Time `json:"captured_at"`
 }
 
 type ChargeOutput struct {
@@ -91,43 +91,34 @@ func (s *PaymentService) Authorize(ctx context.Context, data ChargeInput) (*Char
 		return nil, err
 	}
 
-	// re-assign log to transaction_id
-	log = log.With().
-		Str("func", "Authorize").
-		Str("transaction_id", tx.ID.String()).
-		Logger()
+	// re-assign child
+	log = log.With().Str("func", "Authorize").Str("transaction_id", tx.ID.String()).Logger()
 
 	// call gateway (authorize)
 	status, gwRef, reason := s.callGatewayAuthorize(ctx, tx, log)
 
 	// update transaction
-	queryUpdate := map[string]any{
-		"id":     tx.ID,
-		"status": domain.TransactionStatusPending,
-	}
+	queryUpdate := map[string]any{"id": tx.ID, "status": domain.TransactionStatusPending}
 	updatePayload := domain.Transaction{Status: status}
-
 	if status == domain.TransactionStatusFailed {
 		updatePayload.FailedReason = reason
 	} else {
 		updatePayload.GatewayRef = gwRef
 	}
 
-	updated, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
+	updatedResp, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
 	if err != nil {
-		log.Error().Err(err).Msg("failed update transaction")
+		log.Error().Err(err).Msg("failed to update transaction")
 		return nil, err
 	}
 
 	out := &ChargeOutput{
-		TransactionID: updated.ID,
-		Status:        string(updated.Status),
+		TransactionID: updatedResp.ID,
+		Status:        string(updatedResp.Status),
 	}
 
-	// save idempotency + response cache
-	if err = s.saveIdempotency(ctx, idemKeyID, data.MerchantID, out, log); err != nil {
-		return nil, err
-	}
+	// save idempotency in backgroud
+	go s.saveIdempotency(idemKeyID, data.MerchantID, out, log)
 
 	if status == domain.TransactionStatusFailed {
 		return out, domain.ErrGatewayRejected
@@ -151,7 +142,9 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 	}
 
 	defer func() {
-		_ = s.locker.Release(context.Background(), *lockKey, *lockValue)
+		if err := s.locker.Release(context.Background(), *lockKey, *lockValue); err != nil {
+			log.Error().Err(err).Msg("failed to release locker")
+		}
 	}()
 
 	// check transaction authorized and gateway_ref not null
@@ -164,29 +157,22 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 	status, _, reason := s.callGatewayCapture(ctx, tx, log)
 
 	// update transaction
-	query := map[string]interface{}{
-		"id":     tx.ID,
-		"status": domain.TransactionStatusAuthorized,
-	}
-	payload := &domain.Transaction{
-		Status:       status,
-		FailedReason: reason,
-	}
+	queryUpdate := map[string]interface{}{"id": tx.ID, "status": domain.TransactionStatusAuthorized}
+	updatePayload := &domain.Transaction{Status: status, FailedReason: reason}
 	if status == domain.TransactionStatusCaptured {
 		now := time.Now()
-		payload.CapturedAt = &now
+		updatePayload.CapturedAt = &now
 	}
 
-	updated, err := s.txRepo.UpdateByQueryAndReturn(ctx, query, payload)
+	updatedResp, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
 	if err != nil {
-		log.Error().Err(err).Msg("failed update transaction")
+		log.Error().Err(err).Msg("failed to update transaction")
 		return nil, err
 	}
 
 	out := &CaptureOutput{
-		TransactionID: updated.ID,
-		Status:        string(updated.Status),
-		CapturedAt:    *updated.CapturedAt,
+		TransactionID: updatedResp.ID,
+		Status:        string(updatedResp.Status),
 	}
 
 	if status == domain.TransactionStatusFailed {
@@ -222,7 +208,7 @@ func (s *PaymentService) Charge(ctx context.Context, data ChargeInput) (*ChargeO
 		return nil, err
 	}
 
-	// re-assign log to transaction_id
+	// re-assign child
 	log = log.With().
 		Str("func", "Charge").
 		Str("transaction_id", tx.ID.String()).
@@ -246,16 +232,14 @@ func (s *PaymentService) Charge(ctx context.Context, data ChargeInput) (*ChargeO
 
 	updated, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
 	if err != nil {
-		log.Error().Err(err).Msg("failed update transaction")
+		log.Error().Err(err).Msg("failed to update transaction")
 		return nil, err
 	}
 
 	out := &ChargeOutput{TransactionID: updated.ID, Status: string(updated.Status)}
 
 	// save idempotency + response cache
-	if err := s.saveIdempotency(ctx, idemKeyID, data.MerchantID, out, log); err != nil {
-		return nil, err
-	}
+	go s.saveIdempotency(idemKeyID, data.MerchantID, out, log)
 
 	if status == domain.TransactionStatusFailed {
 		return out, domain.ErrGatewayRejected
@@ -268,7 +252,6 @@ func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID 
 	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
 
 	if err != nil || idem == nil {
-		log.Warn().Msg("duplicate idempotency key — returning cached response")
 		return nil, false
 	}
 
@@ -278,6 +261,7 @@ func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID 
 		return nil, false
 	}
 
+	log.Warn().Msg("duplicate idempotency key — returning cached response")
 	return &out, true
 }
 
@@ -288,7 +272,7 @@ func (s *PaymentService) callGatewayAuthorize(ctx context.Context, tx *domain.Tr
 		OrderID:  tx.ID.String(),
 	})
 	if err != nil || gw == nil {
-		log.Error().Err(err).Msg("failed authorize gateway")
+		log.Error().Err(err).Msg("failed to authorize gateway")
 		reason := err.Error()
 		return domain.TransactionStatusFailed, nil, &reason
 	}
@@ -296,24 +280,25 @@ func (s *PaymentService) callGatewayAuthorize(ctx context.Context, tx *domain.Tr
 	return domain.TransactionStatusAuthorized, &gw.GatewayRef, nil
 }
 
-func (s *PaymentService) saveIdempotency(ctx context.Context, idemKey, merchantID uuid.UUID, out *ChargeOutput, log zerolog.Logger) error {
+func (s *PaymentService) saveIdempotency(key, merchantID uuid.UUID, out *ChargeOutput, log zerolog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	raw, err := json.Marshal(out)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to json marshall output")
-		return err
+		return
 	}
 
 	if err = s.idemRepo.Create(ctx, &domain.IdempotencyKey{
-		Key:        idemKey,
+		Key:        key,
 		MerchantID: merchantID,
 		Response:   raw,
 		ExpiresAt:  time.Now().Add(24 * time.Hour), // 1d
 	}); err != nil {
-		log.Warn().Err(err).Msg("failed to create idempotency key")
-		return err
+		log.Warn().Err(err).Msg("failed to save idempotency key")
 	}
 
-	return nil
 }
 
 func (s *PaymentService) tokenizeCardToGateway(ctx context.Context, data ChargeInput, log zerolog.Logger) (*gateway.TokenizeResponse, error) {
@@ -326,7 +311,7 @@ func (s *PaymentService) tokenizeCardToGateway(ctx context.Context, data ChargeI
 
 	tokenizeResp, err := s.gateway.TokenizeCard(ctx, req)
 	if err != nil {
-		log.Error().Err(err).Msg("failed tokenize card")
+		log.Error().Err(err).Msg("failed to tokenize card")
 		return nil, domain.ErrTokenizeCard
 	}
 
@@ -353,7 +338,7 @@ func (s *PaymentService) saveTransaction(ctx context.Context,
 	}
 
 	if err := s.txRepo.Create(ctx, tx); err != nil {
-		log.Error().Err(err).Msgf("failed create transaction type %s", paymentType)
+		log.Error().Err(err).Msgf("failed to save transaction with payment type: %s", paymentType)
 		return nil, err
 	}
 
@@ -363,7 +348,7 @@ func (s *PaymentService) saveTransaction(ctx context.Context,
 func (s *PaymentService) getTxAuthorized(ctx context.Context, id, merchantID uuid.UUID, log zerolog.Logger) (*domain.Transaction, error) {
 	tx, err := s.txRepo.FindByIDAndMerchantID(ctx, id, merchantID)
 	if err != nil {
-		log.Error().Err(err).Msg("failed find one transaction")
+		log.Error().Err(err).Msg("failed to find transaction")
 		return nil, domain.ErrTransactionNotFound
 	}
 	if tx.GatewayRef == nil || *tx.GatewayRef == "" {
@@ -384,6 +369,10 @@ func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Tran
 		GatewayRef: *tx.GatewayRef,
 	})
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			// TODO: handle case timeout
+		}
+
 		log.Error().Err(err).Msg("failed to capture gateway")
 		reason := err.Error()
 		return domain.TransactionStatusFailed, nil, &reason
@@ -402,10 +391,10 @@ func (s *PaymentService) aquireLock(ctx context.Context, transactionID uuid.UUID
 
 	lockValue, err := s.locker.Acquire(ctx, lockKey, 5*time.Second)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed acquire lock")
+		s.log.Error().Err(err).Msg("failed to acquire lock")
 		return nil, nil, err
 	}
-	if lockKey == "" {
+	if lockValue == "" {
 		s.log.Warn().Msg("duplicated request")
 		return nil, nil, domain.ErrDuplicateRequest
 	}

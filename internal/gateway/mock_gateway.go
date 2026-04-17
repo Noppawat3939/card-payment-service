@@ -57,9 +57,49 @@ func (m *MockGateway) Capture(ctx context.Context, req CaptureRequest) (*Capture
 	}, nil
 }
 
-func (m *MockGateway) Refund(ctx context.Context, gatewayRef string) error {
-	// TODO: implement behind
-	return nil
+func (m *MockGateway) Void(ctx context.Context, req VoidRequest) (*VoidResponse, error) {
+	if req.GatewayRef == "" {
+		return nil, domain.ErrInvalidGatewayRef
+	}
+
+	// simulate rejected
+	if strings.Contains(req.GatewayRef, "VOID_FAIL") {
+		return nil, domain.ErrCardCaptureFailed
+	}
+
+	// simulate timeout
+	if strings.Contains(req.GatewayRef, "VOID_TIMEOUT") {
+		return nil, context.DeadlineExceeded
+	}
+
+	return &VoidResponse{
+		Status:     "volded",
+		GatewayRef: req.GatewayRef,
+	}, nil
+}
+
+func (m *MockGateway) Refund(ctx context.Context, req RefundRequest) (*RefundResponse, error) {
+	if req.GatewayRef == "" {
+		return nil, domain.ErrInvalidGatewayRef
+	}
+
+	if req.Amount <= 0 {
+		return nil, domain.ErrCardAmoutInvalid
+	}
+
+	// simulate rejected
+	if strings.Contains(req.GatewayRef, "REFUND_FAIL") {
+		return nil, domain.ErrCardCaptureFailed
+	}
+	// simulate timeout
+	if strings.Contains(req.GatewayRef, "REFUND_TIMEOUT") {
+		return nil, context.DeadlineExceeded
+	}
+
+	return &RefundResponse{
+		RefundRef: "rf_" + uuid.NewString(),
+		Status:    "processing",
+	}, nil
 }
 
 func (*MockGateway) TokenizeCard(ctx context.Context, req TokenizeRequest) (*TokenizeResponse, error) {

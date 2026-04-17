@@ -187,101 +187,6 @@ credit-card-payment-service/
 └── README.md
 ```
 
----
-
-#### 5. Sequence Diagram Flow
-
-##### Void / Cancel Flow
-
-```mermaid
-sequenceDiagram
-    actor C as Client
-    participant S as Payment Service
-    participant DB as Database
-    participant GW as Payment Gateway
-
-    C->>S: POST /api/v1/payments/{transaction_id}/void
-    S->>S: Validate API Key
-    S->>DB: GET transaction
-    DB-->>S: transaction {status, gateway_ref}
-
-    alt Transaction status = captured
-        S-->>C: 422 Unprocessable<br/>{error: cannot void a captured transaction, use refund instead}
-    else Transaction status = authorized
-        S->>GW: POST void {gateway_ref}
-        GW-->>S: {status=voided}
-        S->>DB: UPDATE transaction (status=voided)
-        DB-->>S: ok
-        S-->>C: 200 OK {transaction_id, status=voided}
-    end
-```
-
-##### Refund Flow
-
-```mermaid
-sequenceDiagram
-    actor C as Client
-    participant S as Payment Service
-    participant DB as Database
-    participant GW as Payment Gateway
-
-    C->>S: POST /api/v1/payments/{transaction_id}/refund<br/>{reason}
-    S->>S: Validate API Key
-    S->>DB: GET transaction (assert status=captured)
-    DB-->>S: transaction {gateway_ref, amount}
-    S->>GW: POST refund {gateway_ref, amount}
-    GW-->>S: {refund_ref, status=processing}
-    S->>DB: UPDATE transaction (status=refunded)<br/>INSERT refund record
-    DB-->>S: ok
-    S-->>C: 200 OK {refund_id, status=processing}
-
-    Note over S,GW: Gateway processes refund asynchronously
-
-    GW->>S: Webhook POST /api/v1/webhooks/payment<br/>{event=refund.completed, refund_ref}
-    S->>S: Verify HMAC Signature
-    S->>DB: UPDATE refund (status=completed)
-    DB-->>S: ok
-    S-->>GW: 200 OK
-```
-
-##### Webhook / Callback Flow
-
-```mermaid
-sequenceDiagram
-    participant GW as Payment Gateway
-    participant S as Payment Service
-    participant DB as Database
-    actor M as Merchant
-
-    GW->>S: POST /api/v1/webhooks/payment<br/>Header: X-Signature: hmac_sha256<br/>{event, transaction_id, gateway_ref, status}
-    S->>S: Verify HMAC Signature
-
-    alt Signature invalid
-        S-->>GW: 401 Unauthorized
-    else Signature valid
-        S->>DB: GET transaction by gateway_ref
-        DB-->>S: transaction
-        S->>DB: UPDATE transaction status
-        DB-->>S: ok
-        S-->>GW: 200 OK
-
-        Note over S,M: Forward event to merchant webhook URL
-
-        S->>M: POST {merchant webhook_url}<br/>{event, transaction_id, status, amount}
-        M-->>S: 200 OK
-    end
-
-    alt Merchant webhook fails (timeout / 5xx)
-        S->>S: Schedule retry (exponential backoff)<br/>max 3 attempts
-        S->>M: POST {merchant webhook_url} (retry)
-        M-->>S: 200 OK
-    end
-```
-
-The system is designed to integrate with any Web, Mobile, or Backend service and supports the full transaction lifecycle — from creating a payment intent through to refund and void. **Only registered merchants with an active API Key are permitted to access the Payment API.**
-
----
-
 > **Note:** The `/dev/playground` route is only accessible when `APP_ENV=development`. It is automatically disabled in production.
 
 ---
@@ -584,5 +489,183 @@ sequenceDiagram
             S->>R: Save Idempotency-Key + response
             S-->>C: 200 OK<br/>{transaction_id, status=captured}
         end
+    end
+```
+
+##### 5.3 Void / Cancel Flow
+
+Cancels an `authorized` transaction before capture.
+
+The service acquires a Redis lock to prevent duplicate requests, then validates that the transaction is in authorized state. If valid, it calls the gateway to void the payment and updates the transaction status accordingly (voided or failed). Finally, the lock is released and the result is returned.
+
+```mermaid
+sequenceDiagram
+    actor C as Client
+    participant S as Payment Service
+    participant R as Redis (Lock)
+    participant DB as Database
+    participant GW as Payment Gateway
+
+    C->>S: POST /api/v1/payments/{transaction_id}/void
+    S->>S: Validate API Key
+
+    S->>R: Acquire lock (tx:{transaction_id})
+
+    alt lock not acquired
+        R-->>S: already locked
+        S-->>C: 409 Conflict (duplicate request)
+    else lock acquired
+        R-->>S: lock success
+
+        S->>DB: GET transaction
+        DB-->>S: {status, gateway_ref}
+
+        alt transaction not found
+            S-->>C: 404 Not Found
+        else status = captured
+            S-->>C: 422 Unprocessable (use refund instead)
+        else status != authorized
+            S-->>C: 422 Invalid state
+        else valid
+            S->>GW: POST void {gateway_ref}
+
+            alt gateway rejected
+                GW-->>S: {status=failed, reason}
+                S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
+                S-->>C: 402 Payment Required
+            else success
+                GW-->>S: {status=voided}
+                S->>DB: UPDATE transaction<br/>status=voided<br/>WHERE status=authorized
+                S-->>C: 200 OK {transaction_id, status=voided}
+            end
+        end
+
+        S->>R: Release lock
+    end
+```
+
+##### 5.4 Refund Flow
+
+Refunds a captured transaction asynchronously.
+
+The service validates the request and uses idempotency + Redis lock to prevent duplicate refunds. It then calls the gateway to initiate the refund and stores a refund record with processing status. The final result is updated later via webhook from the gateway.
+
+```mermaid
+sequenceDiagram
+    actor C as Client
+    participant S as Payment Service
+    participant R as Redis (Lock + Idempotency)
+    participant DB as Database
+    participant GW as Payment Gateway
+
+    C->>S: POST /api/v1/payments/{transaction_id}/refund<br/>Header: Idempotency-Key
+    S->>S: Validate API Key
+
+    S->>R: Check Idempotency-Key
+
+    alt duplicate request
+        R-->>S: cached response
+        S-->>C: 200 OK (same response)
+    else new request
+        R-->>S: not found
+
+        S->>R: Acquire lock (tx:{transaction_id})
+
+        alt lock not acquired
+            R-->>S: already locked
+            S-->>C: 409 Conflict
+        else lock acquired
+            R-->>S: lock success
+
+            S->>DB: GET transaction (status=captured)
+            DB-->>S: {gateway_ref, amount}
+
+            alt invalid transaction
+                S-->>C: 422 Unprocessable
+            else valid
+                S->>GW: POST refund {gateway_ref, amount}
+
+                alt gateway rejected
+                    GW-->>S: {status=failed, reason}
+                    S-->>C: 402 Payment Required
+                else accepted
+                    GW-->>S: {refund_ref, status=processing}
+
+                    S->>DB: INSERT refund record<br/>(status=processing)
+                    S->>R: Save Idempotency-Key + response
+
+                    S-->>C: 200 OK {refund_id, status=processing}
+                end
+            end
+
+            S->>R: Release lock
+        end
+    end
+
+    Note over S,GW: async processing
+
+    GW->>S: Webhook /payment {event=refund.completed}
+    S->>S: Verify HMAC Signature
+    S->>DB: UPDATE refund (status=completed)
+    S-->>GW: 200 OK
+```
+
+##### 5.5 Webhook / Callback Flow
+
+Handles asynchronous updates from the payment gateway (e.g. refund completion).
+
+The service verifies the HMAC signature to ensure the request is trusted, then checks idempotency to avoid processing duplicate events. It updates the corresponding record (e.g. refund status) in the database and returns a success response. After that, the event is forwarded to the merchant’s webhook endpoint with retry on failure.
+
+```mermaid
+sequenceDiagram
+    participant GW as Payment Gateway
+    participant S as Payment Service
+    participant R as Redis (Idempotency)
+    participant DB as Database
+    actor M as Merchant
+
+    GW->>S: POST /api/v1/webhooks/payment<br/>Header: X-Signature<br/>{event=refund.completed, refund_ref, gateway_ref, status}
+
+    S->>S: Verify HMAC Signature
+
+    alt Signature invalid
+        S-->>GW: 401 Unauthorized
+    else Signature valid
+
+        S->>R: Check webhook idempotency (event_id / refund_ref)
+
+        alt duplicate webhook
+            R-->>S: already processed
+            S-->>GW: 200 OK
+        else new webhook
+            R-->>S: not found
+
+            S->>DB: GET refund by refund_ref
+            DB-->>S: refund {status=processing}
+
+            alt refund not found
+                S-->>GW: 404 Not Found
+            else already final state
+                S-->>GW: 200 OK (ignore duplicate state)
+            else valid transition
+                S->>DB: UPDATE refund status (processing → completed)
+                DB-->>S: ok
+
+                S->>R: Save webhook idempotency
+
+                S-->>GW: 200 OK
+
+                Note over S,M: async notify merchant
+
+                S->>M: POST {merchant webhook_url}<br/>{event, refund_id, status}
+                M-->>S: 200 OK
+            end
+        end
+    end
+
+    alt Merchant webhook fails (timeout / 5xx)
+        S->>S: Retry queue (exponential backoff)
+        S->>M: POST webhook (retry)
+        M-->>S: 200 OK
     end
 ```

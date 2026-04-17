@@ -75,3 +75,21 @@ Table idempotency_keys {
     (key, expires_at) [name: 'idx_idempotency_expires_at']
   }
 }
+
+// retry
+Table retry_jobs {
+  id uuid [pk]
+  entity_type varchar(50) [not null, note: "payment / refund"]
+  entity_id uuid [not null]
+  payload jsonb
+  status text [not null, note:"pending / processing / done / failed"]
+  retry_count int [default: 0]
+  max_retries int [default: 5]
+  next_retry_at timestamp [not null]
+  created_at timestamp [increment]
+  updated_at timestamp [increment]
+
+  indexes {
+    (status, next_retry_at) [name:'idx_retry_jobs_ready']
+  }
+}
