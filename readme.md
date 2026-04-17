@@ -546,7 +546,7 @@ sequenceDiagram
 
 ##### 5.4 Refund Flow
 
-Refunds a captured transaction asynchronously.
+Refunds a `captured` transaction asynchronously.
 
 The service validates the request and uses idempotency + Redis lock to prevent duplicate refunds. It then calls the gateway to initiate the refund and stores a refund record with processing status. The final result is updated later via webhook from the gateway.
 
