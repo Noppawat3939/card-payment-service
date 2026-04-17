@@ -13,11 +13,9 @@ type AuthorizePaymentRequest struct {
 type AuthorizePaymentResponse struct {
 	TransactionID string `json:"transaction_id"`
 	Status        string `json:"status"`
-	CreatedAt     string `json:"created_at"`
 }
 
 type CapturePaymentResponse struct {
 	TransactionID string `json:"transaction_id"`
 	Status        string `json:"status"`
-	CapturedAt    string `json:"captured_at"`
 }

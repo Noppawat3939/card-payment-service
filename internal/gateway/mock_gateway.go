@@ -58,6 +58,7 @@ func (m *MockGateway) Capture(ctx context.Context, req CaptureRequest) (*Capture
 }
 
 func (m *MockGateway) Refund(ctx context.Context, gatewayRef string) error {
+	// TODO: implement behind
 	return nil
 }
 
