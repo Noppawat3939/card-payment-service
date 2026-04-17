@@ -18,6 +18,7 @@ var (
 	ErrTokenizeCard             = errors.New("card information invalid")
 	ErrTransactionNotCapturable = errors.New("transaction status not capturable")
 	ErrTransactionNotFound      = errors.New("transaction not found")
+	ErrDuplicateRequest         = errors.New("duplicated request")
 
 	// gateway (mock)
 	ErrCardAmoutInvalid  = errors.New("amount invalid")

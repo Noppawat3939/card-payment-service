@@ -3,6 +3,7 @@ package router
 import (
 	"card-payment-service/internal/gateway"
 	"card-payment-service/internal/handler"
+	appRedis "card-payment-service/internal/infra/redis"
 	"card-payment-service/internal/logger"
 	"card-payment-service/internal/middleware"
 	"card-payment-service/internal/repository"
@@ -13,42 +14,50 @@ import (
 	"gorm.io/gorm"
 )
 
-func RegisterRoutes(r *gin.Engine, db *gorm.DB, redis *redis.Client) {
-	// versioning
-	v1 := r.Group("/v1")
-
-	registerMerchant(v1, db)
-	registerPayment(v1, db)
+type Config struct {
+	rg     *gin.RouterGroup
+	db     *gorm.DB
+	client *redis.Client
 }
 
-func registerMerchant(rg *gin.RouterGroup, db *gorm.DB) {
-	merchantRepo := repository.NewMerchantRepository(db)
-	apiKeyRepo := repository.NewAPIKeyRepository(db)
+func RegisterRoutes(r *gin.Engine, db *gorm.DB, client *redis.Client) {
+	// versioning
+	v1 := r.Group("/v1")
+	cfg := &Config{rg: v1, db: db, client: client}
+
+	registerMerchant(cfg)
+	registerPayment(cfg)
+}
+
+func registerMerchant(cfg *Config) {
+	merchantRepo := repository.NewMerchantRepository(cfg.db)
+	apiKeyRepo := repository.NewAPIKeyRepository(cfg.db)
 
 	logger := logger.With("merchant_service")
 	merchantService := service.NewMerchantService(merchantRepo, apiKeyRepo, logger)
 
 	merchantHandler := handler.NewMerchantHandler(merchantService, logger)
 
-	merchant := rg.Group("/merchants")
+	merchant := cfg.rg.Group("/merchants")
 	{
 		merchant.POST("/register", merchantHandler.Register)
 		merchant.PATCH("/activate", merchantHandler.Activate)
 	}
 }
 
-func registerPayment(rg *gin.RouterGroup, db *gorm.DB) {
+func registerPayment(cfg *Config) {
 	logger := logger.With("payment_service")
 
-	txRepo := repository.NewTransactionRepository(db)
-	idemRepo := repository.NewIdempotencyKeyRepository(db)
+	txRepo := repository.NewTransactionRepository(cfg.db)
+	idemRepo := repository.NewIdempotencyKeyRepository(cfg.db)
 	gateway := gateway.NewMockGateway()
 
-	paymentService := service.NewPaymentService(txRepo, idemRepo, gateway, logger)
+	redisLocker := appRedis.NewRedisLocker(cfg.client)
+	paymentService := service.NewPaymentService(txRepo, idemRepo, gateway, redisLocker, logger)
 
 	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
 
-	payment := rg.Group("/payments")
+	payment := cfg.rg.Group("/payments")
 	payment.Use(middleware.MerchantAuth())
 
 	// routes required idempotency key

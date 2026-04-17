@@ -3,6 +3,7 @@ package service
 import (
 	"card-payment-service/internal/domain"
 	"card-payment-service/internal/gateway"
+	"card-payment-service/internal/infra/redis"
 	"card-payment-service/internal/repository"
 	"context"
 	"encoding/json"
@@ -17,11 +18,12 @@ type PaymentService struct {
 	txRepo   repository.TransactionRepository
 	idemRepo repository.IdempotencyKeyRepository
 	gateway  gateway.Gateway
+	locker   redis.Locker
 	log      zerolog.Logger
 }
 
-func NewPaymentService(txRepo repository.TransactionRepository, idemRepo repository.IdempotencyKeyRepository, gateway gateway.Gateway, log zerolog.Logger) *PaymentService {
-	return &PaymentService{txRepo, idemRepo, gateway, log}
+func NewPaymentService(txRepo repository.TransactionRepository, idemRepo repository.IdempotencyKeyRepository, gateway gateway.Gateway, locker redis.Locker, log zerolog.Logger) *PaymentService {
+	return &PaymentService{txRepo, idemRepo, gateway, locker, log}
 }
 
 type AuthorizeInput struct {
@@ -145,6 +147,16 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 		Str("merchant_id", data.MerchantID.String()).
 		Str("transaction_id", data.TransactionID.String()).
 		Logger()
+
+	// lock transaction for update
+	lockValue, lockKey, err := s.aquireLock(ctx, data.TransactionID, log)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		_ = s.locker.Release(context.Background(), *lockKey, *lockValue)
+	}()
 
 	// check transaction authorized and gateway_ref not null
 	tx, err := s.getTxAuthorized(ctx, data.TransactionID, data.MerchantID, log)
@@ -274,4 +286,21 @@ func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Tran
 	}
 
 	return domain.TransactionStatusCaptured, nil
+}
+
+func (s *PaymentService) aquireLock(ctx context.Context, transactionID uuid.UUID, log zerolog.Logger) (*string, *string, error) {
+	lockKey := fmt.Sprintf("lock:tx:%s", transactionID)
+
+	lockValue, err := s.locker.Acquire(ctx, lockKey, 5*time.Second)
+	if err != nil {
+		s.log.Error().Err(err).Msg("failed acquire lock")
+		return nil, nil, err
+	}
+	if lockKey == "" {
+		s.log.Warn().Msg("duplicated request")
+		return nil, nil, domain.ErrDuplicateRequest
+	}
+
+	// lock success
+	return &lockKey, &lockValue, nil
 }

@@ -41,7 +41,7 @@ func (h *PaymentHandler) Authorize(c *gin.Context) {
 		return
 	}
 
-	response.OK(c, dto.AuthorizePaymentResponse{
+	response.Created(c, dto.AuthorizePaymentResponse{
 		TransactionID: data.TransactionID.String(),
 		Status:        data.Status,
 		CreatedAt:     formatTime(data.CreatedAt),
@@ -91,15 +91,16 @@ func (h *PaymentHandler) Charge(c *gin.Context) {
 
 	// process authorize
 	input := buildAuthorizeInput(c, req, domain.DirectCharge)
-	authorizeRes, err := h.paymentService.Authorize(c, *input)
+	authorizeResp, err := h.paymentService.Authorize(c, *input)
 	if err != nil {
 		statusCode := mapPaymentErrStatusCode(err)
 		response.Error(c, statusCode, err.Error())
 		return
 	}
+
 	// process capture
-	captureRes, err := h.paymentService.Capture(c, service.CaptureInput{
-		TransactionID: authorizeRes.TransactionID,
+	captureResp, err := h.paymentService.Capture(c, service.CaptureInput{
+		TransactionID: authorizeResp.TransactionID,
 		MerchantID:    input.MerchantID,
 	})
 	if err != nil {
@@ -109,9 +110,9 @@ func (h *PaymentHandler) Charge(c *gin.Context) {
 	}
 
 	response.OK(c, &dto.CapturePaymentResponse{
-		TransactionID: captureRes.TransactionID.String(),
-		Status:        captureRes.Status,
-		CapturedAt:    formatTime(captureRes.CapturedAt),
+		TransactionID: captureResp.TransactionID.String(),
+		Status:        captureResp.Status,
+		CapturedAt:    formatTime(captureResp.CapturedAt),
 	})
 }
 
@@ -123,7 +124,8 @@ func mapPaymentErrStatusCode(err error) int {
 	switch {
 	case errors.Is(err, domain.ErrTokenizeCard):
 		return http.StatusNotAcceptable
-	case errors.Is(err, domain.ErrDuplicateIdempotencyKey):
+	case errors.Is(err, domain.ErrDuplicateIdempotencyKey),
+		errors.Is(err, domain.ErrDuplicateRequest):
 		return http.StatusConflict
 	case errors.Is(err, domain.ErrGatewayRejected):
 		return http.StatusPaymentRequired
@@ -134,6 +136,7 @@ func mapPaymentErrStatusCode(err error) int {
 		errors.Is(err, domain.ErrExpiredCard),
 		errors.Is(err, domain.ErrInsufficientFunds):
 		return http.StatusPaymentRequired
+
 	default:
 		return http.StatusInternalServerError
 	}

@@ -504,31 +504,43 @@ This flow completes the actual payment after a successful authorization by trans
 sequenceDiagram
     actor C as Client
     participant S as Payment Service
+    participant R as Redis (Lock)
     participant GW as Payment Gateway
     participant DB as Database
 
     C->>S: POST /v1/payments/{transaction_id}/capture<br/>Header: X-Merchant-ID
     S->>S: Validate API Key
 
-    S->>DB: GET transaction by id + merchant_id
-    DB-->>S: {status=authorized, gateway_ref}
+    S->>R: Acquire lock (key=tx:{transaction_id})
 
-    alt transaction not found or wrong merchant
-        S-->>C: 404 Not Found
-    else status != authorized
-        S-->>C: 422 Unprocessable Entity
-    else valid
-        S->>GW: POST capture {gateway_ref}
+    alt lock not acquired
+        R-->>S: already locked
+        S-->>C: 409 Conflict (duplicate request)
+    else lock acquired
+        R-->>S: lock success
 
-        alt gateway rejected
-            GW-->>S: {status=failed, reason=capture_failed}
-            S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
-            S-->>C: 402 Payment Required
-        else gateway success
-            GW-->>S: {status=captured}
-            S->>DB: UPDATE transaction<br/>status=captured,<br/>captured_at=now()
-            S-->>C: 200 OK<br/>{transaction_id, status=captured}
+        S->>DB: GET transaction by id + merchant_id
+        DB-->>S: {status=authorized, gateway_ref}
+
+        alt transaction not found or wrong merchant
+            S-->>C: 404 Not Found
+        else status != authorized
+            S-->>C: 422 Unprocessable Entity
+        else valid
+            S->>GW: POST capture {gateway_ref}
+
+            alt gateway rejected
+                GW-->>S: {status=failed, reason=capture_failed}
+                S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
+                S-->>C: 402 Payment Required
+            else gateway success
+                GW-->>S: {status=captured}
+                S->>DB: UPDATE transaction<br/>status=captured,<br/>captured_at=now()
+                S-->>C: 200 OK<br/>{transaction_id, status=captured}
+            end
         end
+
+        S->>R: Release lock
     end
 ```
 
