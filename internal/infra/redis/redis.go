@@ -15,7 +15,7 @@ func NewRedis(cfg *config.Config) (*redis.Client, error) {
 		DB:   0,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {

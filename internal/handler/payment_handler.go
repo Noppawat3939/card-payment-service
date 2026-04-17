@@ -8,6 +8,7 @@ import (
 	"card-payment-service/internal/service"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -31,20 +32,9 @@ func (h *PaymentHandler) Authorize(c *gin.Context) {
 		return
 	}
 
-	merchantID := c.MustGet(middleware.MerchantIDKey).(uuid.UUID)
-	idemKey := c.MustGet(middleware.IdempotencyKeyContextKey).(string)
+	input := buildAuthorizeInput(c, req, domain.AuthorizeCapture)
 
-	data, err := h.paymentService.Authorize(c, service.AuthorizeInput{
-		Amount:         req.Amount,
-		CardNumber:     req.CardNumber,
-		Currency:       req.Currency,
-		CVV:            req.CVV,
-		Description:    req.Description,
-		ExpiryMonth:    req.ExpiryMonth,
-		ExpiryYear:     req.ExpiryYear,
-		IdempotencyKey: idemKey,
-		MerchantID:     merchantID,
-	})
+	data, err := h.paymentService.Authorize(c, *input)
 	if err != nil {
 		statusCode := mapPaymentErrStatusCode(err)
 		response.Error(c, statusCode, err.Error())
@@ -54,7 +44,7 @@ func (h *PaymentHandler) Authorize(c *gin.Context) {
 	response.OK(c, dto.AuthorizePaymentResponse{
 		TransactionID: data.TransactionID.String(),
 		Status:        data.Status,
-		CreatedAt:     data.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:     formatTime(data.CreatedAt),
 	})
 }
 
@@ -87,7 +77,41 @@ func (h *PaymentHandler) Capture(c *gin.Context) {
 	response.OK(c, &dto.CapturePaymentResponse{
 		TransactionID: data.TransactionID.String(),
 		Status:        data.Status,
-		CapturedAt:    data.CapturedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CapturedAt:    formatTime(data.CapturedAt),
+	})
+}
+
+func (h *PaymentHandler) Charge(c *gin.Context) {
+	var req dto.AuthorizePaymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logErr(c, err)
+		response.BadRequest(c)
+		return
+	}
+
+	// process authorize
+	input := buildAuthorizeInput(c, req, domain.DirectCharge)
+	authorizeRes, err := h.paymentService.Authorize(c, *input)
+	if err != nil {
+		statusCode := mapPaymentErrStatusCode(err)
+		response.Error(c, statusCode, err.Error())
+		return
+	}
+	// process capture
+	captureRes, err := h.paymentService.Capture(c, service.CaptureInput{
+		TransactionID: authorizeRes.TransactionID,
+		MerchantID:    input.MerchantID,
+	})
+	if err != nil {
+		statusCode := mapPaymentErrStatusCode(err)
+		response.Error(c, statusCode, err.Error())
+		return
+	}
+
+	response.OK(c, &dto.CapturePaymentResponse{
+		TransactionID: captureRes.TransactionID.String(),
+		Status:        captureRes.Status,
+		CapturedAt:    formatTime(captureRes.CapturedAt),
 	})
 }
 
@@ -113,4 +137,26 @@ func mapPaymentErrStatusCode(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+func buildAuthorizeInput(c *gin.Context, req dto.AuthorizePaymentRequest, paymentType domain.PaymentType) *service.AuthorizeInput {
+	merchantID := c.MustGet(middleware.MerchantIDKey).(uuid.UUID)
+	idemKey := c.MustGet(middleware.IdempotencyKeyContextKey).(string)
+
+	return &service.AuthorizeInput{
+		Amount:         req.Amount,
+		CardNumber:     req.CardNumber,
+		Currency:       req.Currency,
+		CVV:            req.CVV,
+		Description:    req.Description,
+		ExpiryMonth:    req.ExpiryMonth,
+		ExpiryYear:     req.ExpiryYear,
+		IdempotencyKey: idemKey,
+		MerchantID:     merchantID,
+		PaymentType:    paymentType,
+	}
+}
+
+func formatTime(t time.Time) string {
+	return t.Format("2006-01-02T15:04:05Z07:00")
 }

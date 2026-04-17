@@ -49,8 +49,15 @@ func registerPayment(rg *gin.RouterGroup, db *gorm.DB) {
 	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
 
 	payment := rg.Group("/payments")
+	payment.Use(middleware.MerchantAuth())
+
+	// routes required idempotency key
+	withIdemKey := payment.Group("")
+	withIdemKey.Use(middleware.RequireIdempotencyKey())
 	{
-		payment.POST("/authorize", middleware.MerchantAuth(), middleware.RequireIdempotencyKey(), paymentHandler.Authorize)
-		payment.POST("/:transaction_id/capture", middleware.MerchantAuth(), paymentHandler.Capture)
+		withIdemKey.POST("/authorize", paymentHandler.Authorize)
+		withIdemKey.POST("/charge", paymentHandler.Charge)
 	}
+	// routes without idempotency key
+	payment.POST("/:transaction_id/capture", paymentHandler.Capture)
 }

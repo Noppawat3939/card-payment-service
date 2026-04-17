@@ -34,6 +34,7 @@ type AuthorizeInput struct {
 	ExpiryYear     string
 	IdempotencyKey string
 	MerchantID     uuid.UUID
+	PaymentType    domain.PaymentType
 }
 
 type AuthorizeOutput struct {
@@ -72,7 +73,7 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	tx := &domain.Transaction{
 		ID:             uuid.New(),
 		MerchantID:     data.MerchantID,
-		PaymentType:    domain.AuthorizeCapture,
+		PaymentType:    data.PaymentType,
 		Status:         domain.TransactionStatusPending,
 		CardToken:      tokenResp.CardToken,
 		CardLastFour:   tokenResp.LastFour,
@@ -94,8 +95,12 @@ func (s *PaymentService) Authorize(ctx context.Context, data AuthorizeInput) (*A
 	status, gwRef, reason := s.callGatewayAuthorize(ctx, tx, log)
 
 	// update transaction
-	updated, err := s.txRepo.UpdateAndReturn( // TODO: handle concurrency
-		ctx, tx.ID, &domain.Transaction{
+	query := map[string]interface{}{
+		"id":     tx.ID,
+		"status": domain.TransactionStatusPending,
+	}
+	updated, err := s.txRepo.UpdateByQueryAndReturn(
+		ctx, query, &domain.Transaction{
 			Status:       status,
 			FailedReason: reason,
 			GatewayRef:   gwRef,
@@ -151,6 +156,10 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 	status, reason := s.callGatewayCapture(ctx, tx, log)
 
 	// update transaction
+	query := map[string]interface{}{
+		"id":     tx.ID,
+		"status": domain.TransactionStatusAuthorized,
+	}
 	payload := &domain.Transaction{
 		Status:       status,
 		FailedReason: reason,
@@ -160,7 +169,7 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 		payload.CapturedAt = &now
 	}
 
-	updated, err := s.txRepo.UpdateAndReturn(ctx, tx.ID, payload) // TODO: handle concurrency
+	updated, err := s.txRepo.UpdateByQueryAndReturn(ctx, query, payload)
 	if err != nil {
 		log.Error().Err(err).Msg("failed update transaction")
 		return nil, err
