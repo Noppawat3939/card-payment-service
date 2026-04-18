@@ -107,82 +107,95 @@ pending → authorized → captured → refunded
 credit-card-payment-service/
 ├── cmd/
 │   └── server/
-│       └── main.go                  # App bootstrap + infra init
+│       └── main.go                      # App bootstrap + infra init
 │
 ├── internal/
 │   ├── config/
-│   │   └── config.go                # Env config + DSN helper
+│   │   └── config.go                    # Env config + DSN helper + Redis address
 │   │
 │   ├── infra/
-│   │   └── database/
-│   │       └── database.go          # GORM PostgreSQL connection
+│   │   ├── database/
+│   │   │   └── database.go              # PostgreSQL connection
 │   │   └── redis/
-│   │       └── redis.go             # Redis connection
+│   │       ├── redis.go                 # Redis connection
+│   │       └── locker.go                # Distributed lock (SET NX EX)
 │   │
 │   ├── logger/
-│   │   ├── logger.go                # Zerolog initialization
-│   │   └── middleware.go            # Gin request logging middleware
+│   │   ├── logger.go                    # Zerolog initialization
+│   │   └── middleware.go                # Gin request logging middleware
 │   │
 │   ├── domain/
-│   │   ├── merchant.go              # Merchant entity + status
-│   │   ├── api_key.go               # API key entity
-│   │   ├── payment.go               # Payment entity + lifecycle
-│   │   └── errors.go                # Domain business errors
+│   │   ├── merchant.go                  # Merchant entity + status
+│   │   ├── api_key.go                   # API key entity
+│   │   ├── transaction.go               # Transaction entity + lifecycle
+│   │   ├── refund.go                    # Refund entity + status
+│   │   └── errors.go                    # Domain business errors
 │   │
 │   ├── handler/
 │   │   ├── dto/
-│   │   │   ├── merchant_dto.go      # HTTP request / response DTO
-│   │   │   └── payment_dto.go
-│   │   │
-│   │   ├── merchant_handler.go      # Merchant endpoints
-│   │   ├── payment_handler.go       # Payment endpoints
-│   │   ├── webhook_handler.go       # Webhook callback endpoints
-│   │   └── playground_handler.go    # Dev-only testing UI
+│   │   │   ├── merchant_dto.go          # Merchant request / response DTO
+│   │   │   └── payment_dto.go           # Payment request / response DTO
+│   │   ├── merchant_handler.go          # Merchant endpoints
+│   │   ├── payment_handler.go           # Payment endpoints
+│   │   ├── webhook_handler.go           # Webhook receiver + HMAC verify
+│   │   └── playground_handler.go        # Dev-only testing UI (embed.FS)
 │   │
 │   ├── service/
-│   │   ├── merchant_service.go      # Merchant use cases
-│   │   ├── payment_service.go       # Payment business flow
-│   │   └── token_service.go         # Tokenization flow
+│   │   ├── merchant_service.go          # Merchant registration, key management
+│   │   └── payment_service.go           # Payment business flow
 │   │
 │   ├── repository/
-│   │   ├── merchant_repo.go         # Merchant DB access
-│   │   ├── api_key_repo.go          # API key DB access
-│   │   ├── payment_repo.go          # Payment DB access
-│   │   └── token_repo.go            # Token DB access
+│   │   ├── merchant_repo.go             # Merchant DB access
+│   │   ├── api_key_repo.go              # API key DB access
+│   │   ├── transaction_repo.go          # Transaction DB access
+│   │   ├── refund_repo.go               # Refund DB access
+│   │   └── idempotency_repo.go          # Idempotency key DB access
 │   │
 │   ├── gateway/
-│   │   └── gateway_client.go        # Third-party payment adapter
+│   │   ├── gateway.go                   # Gateway interface + request/response types
+│   │   ├── mock_gateway.go              # Mock gateway (dev + test)
+│   │   └── retryable_gateway.go         # Retry wrapper (exponential backoff + jitter)
 │   │
 │   ├── middleware/
-│   │   ├── auth.go                  # API key auth
-│   │   ├── idempotency.go           # Duplicate request protection
-│   │   └── rate_limit.go            # Rate limiting
+│   │   ├── auth.go                      # API key validation + merchant status check
+│   │   ├── idempotency.go               # Duplicate request protection
+│   │   └── rate_limit.go                # Rate limiter
 │   │
 │   ├── response/
-│   │   ├── response.go              # Success response formatter
-│   │   └── error.go                 # Error response mapper
+│   │   ├── response.go                  # Success response formatter
+│   │   └── error.go                     # Error response mapper
 │   │
 │   └── router/
-│       └── router.go                # Route registration + dependency wiring
+│       └── router.go                    # Route registration + dependency wiring
 │
-├── static/
+├── static/                              # Embedded via embed.FS (dev only)
 │   └── playground/
-│       ├── index.html
+│       ├── index.html                   # Payment testing UI
 │       ├── style.css
 │       └── app.js
+│
+├── tools/
+│   └── webhook-simulator/               # Dev tool — simulate gateway webhook callbacks
+│       ├── main.go                      # HTTP server (port 8081)
+│       ├── simulator.go                 # Event builder + HMAC signer
+│       └── README.md                    # How to run + available events
 │
 ├── migrations/
 │   ├── 000001_create_merchants.up.sql
 │   ├── 000001_create_merchants.down.sql
-│   ├── 000002_create_transactions.up.sql
-│   ├── 000002_create_transactions.down.sql
-│   ├── 000003_create_tokens.up.sql
-│   └── 000003_create_tokens.down.sql
+│   ├── 000002_create_api_keys.up.sql
+│   ├── 000002_create_api_keys.down.sql
+│   ├── 000003_create_transactions.up.sql
+│   ├── 000003_create_transactions.down.sql
+│   ├── 000004_create_refunds.up.sql
+│   ├── 000004_create_refunds.down.sql
+│   ├── 000005_create_idempotency_keys.up.sql
+│   └── 000005_create_idempotency_keys.down.sql
 │
 ├── .env.example
 ├── .env.local
-├── docker-compose.yml
 ├── .air.toml
+├── docker-compose.yml
 ├── Makefile
 └── README.md
 ```
@@ -509,38 +522,40 @@ sequenceDiagram
     C->>S: POST /api/v1/payments/{transaction_id}/void
     S->>S: Validate API Key
 
-    S->>R: Acquire lock (tx:{transaction_id})
+    S->>R: Acquire lock (lock:tx:{transaction_id})
 
     alt lock not acquired
         R-->>S: already locked
         S-->>C: 409 Conflict (duplicate request)
     else lock acquired
         R-->>S: lock success
+        Note over S,R: defer Release lock (runs on all paths below)
 
-        S->>DB: GET transaction
-        DB-->>S: {status, gateway_ref}
+        S->>DB: GET transaction<br/>WHERE id = ? AND merchant_id = ?
+        DB-->>S: result
 
         alt transaction not found
             S-->>C: 404 Not Found
+        else status = voided
+            S-->>C: 409 Conflict (already voided)
         else status = captured
             S-->>C: 422 Unprocessable (use refund instead)
         else status != authorized
             S-->>C: 422 Invalid state
-        else valid
+        else status = authorized
             S->>GW: POST void {gateway_ref}
 
             alt gateway rejected
                 GW-->>S: {status=failed, reason}
-                S->>DB: UPDATE transaction<br/>status=failed,<br/>failed_reason
+                S->>DB: UPDATE transaction<br/>status=failed, failed_reason<br/>WHERE status=authorized
                 S-->>C: 402 Payment Required
             else success
                 GW-->>S: {status=voided}
                 S->>DB: UPDATE transaction<br/>status=voided<br/>WHERE status=authorized
+                DB-->>S: ok
                 S-->>C: 200 OK {transaction_id, status=voided}
             end
         end
-
-        S->>R: Release lock
     end
 ```
 
@@ -569,20 +584,25 @@ sequenceDiagram
     else new request
         R-->>S: not found
 
-        S->>R: Acquire lock (tx:{transaction_id})
+        S->>R: Acquire lock (lock:tx:{transaction_id})
 
         alt lock not acquired
             R-->>S: already locked
-            S-->>C: 409 Conflict
+            S-->>C: 409 Conflict (duplicate request)
         else lock acquired
             R-->>S: lock success
+            Note over S,R: defer Release lock (runs on all paths below)
 
-            S->>DB: GET transaction (status=captured)
-            DB-->>S: {gateway_ref, amount}
+            S->>DB: GET transaction<br/>WHERE id = ? AND merchant_id = ?
+            DB-->>S: result
 
-            alt invalid transaction
-                S-->>C: 422 Unprocessable
-            else valid
+            alt transaction not found
+                S-->>C: 404 Not Found
+            else status = refunded
+                S-->>C: 409 Conflict (already refunded)
+            else status != captured
+                S-->>C: 422 Unprocessable (invalid state for refund)
+            else status = captured
                 S->>GW: POST refund {gateway_ref, amount}
 
                 alt gateway rejected
@@ -591,14 +611,15 @@ sequenceDiagram
                 else accepted
                     GW-->>S: {refund_ref, status=processing}
 
-                    S->>DB: INSERT refund record<br/>(status=processing)
+                    S->>DB: UPDATE transaction<br/>status=refunded<br/>WHERE status=captured
+                    S->>DB: INSERT refund record<br/>{refund_ref, status=processing}
+                    DB-->>S: ok
+
                     S->>R: Save Idempotency-Key + response
 
                     S-->>C: 200 OK {refund_id, status=processing}
                 end
             end
-
-            S->>R: Release lock
         end
     end
 
@@ -632,7 +653,7 @@ sequenceDiagram
         S-->>GW: 401 Unauthorized
     else Signature valid
 
-        S->>R: Check webhook idempotency (event_id / refund_ref)
+        S->>R: Check webhook idempotency (refund_ref)
 
         alt duplicate webhook
             R-->>S: already processed
@@ -641,31 +662,33 @@ sequenceDiagram
             R-->>S: not found
 
             S->>DB: GET refund by refund_ref
-            DB-->>S: refund {status=processing}
+            DB-->>S: result
 
             alt refund not found
-                S-->>GW: 404 Not Found
-            else already final state
-                S-->>GW: 200 OK (ignore duplicate state)
-            else valid transition
-                S->>DB: UPDATE refund status (processing → completed)
+                S->>S: log error (unknown refund_ref)
+                S-->>GW: 200 OK (prevent gateway retry loop)
+            else already final state (completed / failed)
+                S->>R: Save webhook idempotency
+                S-->>GW: 200 OK
+            else valid transition (processing → completed)
+                S->>DB: UPDATE refund status=completed<br/>WHERE status=processing
                 DB-->>S: ok
 
                 S->>R: Save webhook idempotency
-
                 S-->>GW: 200 OK
 
-                Note over S,M: async notify merchant
+                Note over S,M: async — notify merchant via registered webhook_url
 
-                S->>M: POST {merchant webhook_url}<br/>{event, refund_id, status}
-                M-->>S: 200 OK
+                S->>M: POST {merchant webhook_url}<br/>{event, refund_id, status=completed}
+
+                alt merchant webhook success
+                    M-->>S: 200 OK
+                else merchant webhook fails (timeout / 5xx)
+                    S->>S: Push to retry queue<br/>(exponential backoff, max 3 attempts)
+                    S->>M: POST webhook (retry)
+                    M-->>S: 200 OK
+                end
             end
         end
-    end
-
-    alt Merchant webhook fails (timeout / 5xx)
-        S->>S: Retry queue (exponential backoff)
-        S->>M: POST webhook (retry)
-        M-->>S: 200 OK
     end
 ```

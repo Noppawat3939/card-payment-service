@@ -73,7 +73,7 @@ func (m *MockGateway) Void(ctx context.Context, req VoidRequest) (*VoidResponse,
 	}
 
 	return &VoidResponse{
-		Status:     "volded",
+		Status:     "voided",
 		GatewayRef: req.GatewayRef,
 	}, nil
 }

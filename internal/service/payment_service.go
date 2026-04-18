@@ -7,7 +7,6 @@ import (
 	"card-payment-service/internal/repository"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -369,10 +368,6 @@ func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Tran
 		GatewayRef: *tx.GatewayRef,
 	})
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			// TODO: handle case timeout
-		}
-
 		log.Error().Err(err).Msg("failed to capture gateway")
 		reason := err.Error()
 		return domain.TransactionStatusFailed, nil, &reason

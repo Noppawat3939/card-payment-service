@@ -64,7 +64,7 @@ Enum payment_type {
 }
 
 Table idempotency_keys {
-  key         varchar(255)  [pk]
+  key         uuid  [pk]
   merchant_id uuid          [not null, ref: > merchants.id]
   response    jsonb         [not null]
   created_at  timestamp     [not null, default: `now()`]
@@ -76,20 +76,25 @@ Table idempotency_keys {
   }
 }
 
-// retry
-Table retry_jobs {
-  id uuid [pk]
-  entity_type varchar(50) [not null, note: "payment / refund"]
-  entity_id uuid [not null]
-  payload jsonb
-  status text [not null, note:"pending / processing / done / failed"]
-  retry_count int [default: 0]
-  max_retries int [default: 5]
-  next_retry_at timestamp [not null]
-  created_at timestamp [increment]
-  updated_at timestamp [increment]
+Table refunds {
+  id             uuid          [pk]
+  transaction_id uuid          [not null, ref: > transactions.id]
+  merchant_id    uuid          [not null, ref: > merchants.id]
+  refund_ref     varchar(255)  [null]
+  amount         bigint        [not null]
+  status         refund_status [not null, default: "processing"]
+  failed_reason  varchar(500)  [null]
+  created_at     timestamp     [increment ,not null, default: `now()`]
+  updated_at     timestamp     [not null, default: `now()`]
 
   indexes {
-    (status, next_retry_at) [name:'idx_retry_jobs_ready']
+    (refund_ref) [name: 'idx_refunds_refund_ref']
+    (transaction_id) [name: 'idx_refunds_transaction_id']
   }
+}
+
+Enum refund_status {
+  processing
+  completed
+  failed
 }
