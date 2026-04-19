@@ -54,24 +54,12 @@ func (h *PaymentHandler) Authorize(c *gin.Context) {
 }
 
 func (h *PaymentHandler) Capture(c *gin.Context) {
-	transactionIDStr := c.Param("transaction_id")
-	if transactionIDStr == "" {
-		h.logErr(c, errors.New("missing transaction_id"))
-		response.BadRequest(c)
-		return
-	}
-
-	transactionID, err := uuid.Parse(transactionIDStr)
-	if err != nil {
-		h.logErr(c, err)
-		response.Error(c, http.StatusBadRequest, err.Error())
-		return
-	}
+	transactionID := h.validateTransactionID(c)
 
 	merchantID := c.MustGet(middleware.MerchantIDKey).(uuid.UUID)
 
 	capturedResp, err := h.paymentService.Capture(c, service.CaptureInput{
-		TransactionID: transactionID,
+		TransactionID: *transactionID,
 		MerchantID:    merchantID,
 	})
 	if err != nil {
@@ -110,6 +98,32 @@ func (h *PaymentHandler) Charge(c *gin.Context) {
 	})
 }
 
+func (h *PaymentHandler) Void(c *gin.Context) {
+	var req dto.VoidPaymentResponse
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logErr(c, err)
+		response.BadRequest(c)
+		return
+	}
+
+	transactionID := h.validateTransactionID(c)
+	merchantID := c.MustGet(middleware.MerchantIDKey).(uuid.UUID)
+
+	voidedResp, err := h.paymentService.Void(c, service.VoidInput{TransactionID: *transactionID, MerchantID: merchantID})
+	if err != nil {
+		status := mapPaymentErrStatusCode(err)
+		response.Error(c, status, err.Error())
+		return
+	}
+
+	data := dto.VoidPaymentResponse{
+		TransactionID: voidedResp.TransactionID.String(),
+		Status:        voidedResp.Status,
+	}
+	response.OK(c, data)
+}
+
 func (h *PaymentHandler) logErr(c *gin.Context, err error) {
 	h.log.Err(err).Str("path", c.FullPath()).Msg(err.Error())
 }
@@ -120,6 +134,7 @@ func mapPaymentErrStatusCode(err error) int {
 		return http.StatusNotAcceptable
 
 	case errors.Is(err, domain.ErrDuplicateIdempotencyKey),
+		errors.Is(err, domain.ErrTransactionAlreadyVoided),
 		errors.Is(err, domain.ErrDuplicateRequest):
 		return http.StatusConflict
 
@@ -154,4 +169,23 @@ func buildChargeInput(c *gin.Context, req dto.AuthorizePaymentRequest) *service.
 		IdempotencyKey: idemKey,
 		MerchantID:     merchantID,
 	}
+}
+
+func (h *PaymentHandler) validateTransactionID(c *gin.Context) *uuid.UUID {
+	txStr := c.Param("transaction_id")
+	if txStr == "" {
+		h.logErr(c, errors.New("body invalid missing transaction_id"))
+		response.BadRequest(c)
+		return nil
+	}
+
+	// parse uuid
+	txID, err := uuid.Parse(txStr)
+
+	if err != nil {
+		h.logErr(c, err)
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return nil
+	}
+	return &txID
 }

@@ -64,6 +64,16 @@ type ChargeOutput struct {
 	Status        string    `json:"status"`
 }
 
+type VoidInput struct {
+	TransactionID uuid.UUID
+	MerchantID    uuid.UUID
+}
+
+type VoidOutput struct {
+	TransactionID uuid.UUID `json:"transaction_id"`
+	Status        string    `json:"status"`
+}
+
 func (s *PaymentService) Authorize(ctx context.Context, data ChargeInput) (*ChargeOutput, error) {
 	// initialize log Authorize service
 	log := s.log.With().
@@ -247,6 +257,60 @@ func (s *PaymentService) Charge(ctx context.Context, data ChargeInput) (*ChargeO
 	return out, nil
 }
 
+func (s *PaymentService) Void(ctx context.Context, data VoidInput) (*VoidOutput, error) {
+	// intialize log Void service
+	log := s.log.With().
+		Str("func", "Void").
+		Str("merchant_id", data.MerchantID.String()).
+		Str("transaction_id", data.TransactionID.String()).
+		Logger()
+
+	// lock transaction for update
+	lockValue, lockKey, err := s.aquireLock(ctx, data.TransactionID, log)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if err := s.locker.Release(context.Background(), *lockKey, *lockValue); err != nil {
+			log.Error().Err(err).Msg("failed to release locker")
+		}
+	}()
+
+	// query transaction authorized
+	tx, err := s.getTxAuthorized(ctx, data.TransactionID, data.MerchantID, log)
+	if err != nil {
+		return nil, err
+	}
+	if tx.Status == domain.TransactionStatusVoided {
+		return nil, domain.ErrTransactionAlreadyVoided
+	}
+
+	// call gateway
+	status, reason := s.callGatewayVoid(ctx, tx, log)
+
+	// update transaction
+	queryUpdate := map[string]interface{}{"id": tx.ID, "status": domain.TransactionStatusAuthorized}
+	updatePayload := &domain.Transaction{Status: status, FailedReason: reason}
+
+	updatedResp, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to update transaction")
+		return nil, err
+	}
+
+	out := &VoidOutput{
+		TransactionID: updatedResp.ID,
+		Status:        string(updatedResp.Status),
+	}
+
+	if status == domain.TransactionStatusFailed {
+		return out, domain.ErrGatewayRejected
+	}
+
+	return out, nil
+}
+
 func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID, log zerolog.Logger) (*ChargeOutput, bool) {
 	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
 
@@ -379,6 +443,21 @@ func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Tran
 	}
 
 	return domain.TransactionStatusCaptured, &resp.GatewayRef, nil
+}
+
+func (s *PaymentService) callGatewayVoid(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, failedReason *string) {
+	resp, err := s.gateway.Void(ctx, gateway.VoidRequest{GatewayRef: *tx.GatewayRef, OrderID: tx.ID.String()})
+	if err != nil {
+		log.Error().Err(err).Msg("failed to void gateway")
+		reason := err.Error()
+		return domain.TransactionStatusFailed, &reason
+	}
+	if resp == nil {
+		log.Error().Err(err).Msg("gateway returned empty response")
+		reason := "empty gateway response"
+		return domain.TransactionStatusFailed, &reason
+	}
+	return domain.TransactionStatusVoided, nil
 }
 
 func (s *PaymentService) aquireLock(ctx context.Context, transactionID uuid.UUID, log zerolog.Logger) (*string, *string, error) {

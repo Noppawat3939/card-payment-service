@@ -69,4 +69,5 @@ func registerPayment(cfg *Config) {
 	}
 	// routes without idempotency key
 	payment.POST("/:transaction_id/capture", paymentHandler.Capture)
+	payment.POST(":transaction_id/void", paymentHandler.Void)
 }

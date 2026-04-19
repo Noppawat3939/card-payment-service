@@ -37,6 +37,7 @@ type CaptureResponse struct {
 }
 
 type VoidRequest struct {
+	OrderID    string
 	GatewayRef string
 }
 

@@ -19,3 +19,8 @@ type CapturePaymentResponse struct {
 	TransactionID string `json:"transaction_id"`
 	Status        string `json:"status"`
 }
+
+type VoidPaymentResponse struct {
+	TransactionID string `json:"transaction_id"`
+	Status        string `json:"status"`
+}

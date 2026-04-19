@@ -42,6 +42,9 @@ func (m *MockGateway) Capture(ctx context.Context, req CaptureRequest) (*Capture
 	if req.GatewayRef == "" {
 		return nil, domain.ErrInvalidGatewayRef
 	}
+	if req.OrderID == "" {
+		return nil, domain.ErrBodyInvalid
+	}
 	// simulate rejected
 	if strings.Contains(req.GatewayRef, "FAIL") {
 		return nil, domain.ErrCardCaptureFailed
@@ -61,7 +64,9 @@ func (m *MockGateway) Void(ctx context.Context, req VoidRequest) (*VoidResponse,
 	if req.GatewayRef == "" {
 		return nil, domain.ErrInvalidGatewayRef
 	}
-
+	if req.OrderID == "" {
+		return nil, domain.ErrBodyInvalid
+	}
 	// simulate rejected
 	if strings.Contains(req.GatewayRef, "VOID_FAIL") {
 		return nil, domain.ErrCardCaptureFailed

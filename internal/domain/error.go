@@ -19,6 +19,7 @@ var (
 	ErrTransactionNotCapturable = errors.New("transaction status not capturable")
 	ErrTransactionNotFound      = errors.New("transaction not found")
 	ErrDuplicateRequest         = errors.New("duplicated request")
+	ErrTransactionAlreadyVoided = errors.New("transaction already voided")
 
 	// gateway (mock)
 	ErrCardAmoutInvalid  = errors.New("amount invalid")
