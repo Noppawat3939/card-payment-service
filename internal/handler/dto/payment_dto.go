@@ -1,5 +1,11 @@
 package dto
 
+import (
+	"card-payment-service/internal/domain"
+
+	"github.com/google/uuid"
+)
+
 type AuthorizePaymentRequest struct {
 	Amount      int64   `json:"amount" binding:"required"`
 	CardNumber  string  `json:"card_number" binding:"required"`
@@ -11,16 +17,21 @@ type AuthorizePaymentRequest struct {
 }
 
 type AuthorizePaymentResponse struct {
-	TransactionID string `json:"transaction_id"`
-	Status        string `json:"status"`
+	TransactionID uuid.UUID                `json:"transaction_id"`
+	Status        domain.TransactionStatus `json:"status"`
 }
 
 type CapturePaymentResponse struct {
-	TransactionID string `json:"transaction_id"`
-	Status        string `json:"status"`
+	TransactionID uuid.UUID                `json:"transaction_id"`
+	Status        domain.TransactionStatus `json:"status"`
 }
 
 type VoidPaymentResponse struct {
-	TransactionID string `json:"transaction_id"`
-	Status        string `json:"status"`
+	TransactionID uuid.UUID                `json:"transaction_id"`
+	Status        domain.TransactionStatus `json:"status"`
+}
+
+type RefundResponse struct {
+	RefundID uuid.UUID           `json:"refund_id"`
+	Status   domain.RefundStatus `json:"status"`
 }

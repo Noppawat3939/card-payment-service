@@ -50,10 +50,11 @@ func registerPayment(cfg *Config) {
 
 	txRepo := repository.NewTransactionRepository(cfg.db)
 	idemRepo := repository.NewIdempotencyKeyRepository(cfg.db)
+	refundRepo := repository.NewRefundRepository(cfg.db)
 	gateway := gateway.NewMockGateway()
 
 	redisLocker := appRedis.NewRedisLocker(cfg.client)
-	paymentService := service.NewPaymentService(txRepo, idemRepo, gateway, redisLocker, logger)
+	paymentService := service.NewPaymentService(txRepo, idemRepo, refundRepo, gateway, redisLocker, logger)
 
 	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
 
@@ -66,6 +67,7 @@ func registerPayment(cfg *Config) {
 	{
 		withIdemKey.POST("/authorize", paymentHandler.Authorize)
 		withIdemKey.POST("/charge", paymentHandler.Charge)
+		withIdemKey.POST("/refund/:transaction_id", paymentHandler.Refund)
 	}
 	// routes without idempotency key
 	payment.POST("/:transaction_id/capture", paymentHandler.Capture)

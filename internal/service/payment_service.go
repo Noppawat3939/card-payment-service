@@ -15,15 +15,17 @@ import (
 )
 
 type PaymentService struct {
-	txRepo   repository.TransactionRepository
-	idemRepo repository.IdempotencyKeyRepository
-	gateway  gateway.Gateway
-	locker   redis.Locker
-	log      zerolog.Logger
+	txRepo     repository.TransactionRepository
+	idemRepo   repository.IdempotencyKeyRepository
+	refundRepo repository.RefundRepository
+	gateway    gateway.Gateway
+	locker     redis.Locker
+	log        zerolog.Logger
 }
 
 func NewPaymentService(txRepo repository.TransactionRepository,
 	idemRepo repository.IdempotencyKeyRepository,
+	refundRepo repository.RefundRepository,
 	gateway gateway.Gateway,
 	locker redis.Locker,
 	log zerolog.Logger,
@@ -31,47 +33,11 @@ func NewPaymentService(txRepo repository.TransactionRepository,
 	return &PaymentService{
 		txRepo,
 		idemRepo,
+		refundRepo,
 		gateway,
 		locker,
 		log,
 	}
-}
-
-type ChargeInput struct {
-	Amount         int64
-	CardNumber     string
-	Currency       string
-	CVV            string
-	Description    *string
-	ExpiryMonth    string
-	ExpiryYear     string
-	IdempotencyKey string
-	MerchantID     uuid.UUID
-}
-
-type CaptureInput struct {
-	TransactionID uuid.UUID
-	MerchantID    uuid.UUID
-}
-
-type CaptureOutput struct {
-	TransactionID uuid.UUID `json:"transaction_id"`
-	Status        string    `json:"status"`
-}
-
-type ChargeOutput struct {
-	TransactionID uuid.UUID `json:"transaction_id"`
-	Status        string    `json:"status"`
-}
-
-type VoidInput struct {
-	TransactionID uuid.UUID
-	MerchantID    uuid.UUID
-}
-
-type VoidOutput struct {
-	TransactionID uuid.UUID `json:"transaction_id"`
-	Status        string    `json:"status"`
 }
 
 func (s *PaymentService) Authorize(ctx context.Context, data ChargeInput) (*ChargeOutput, error) {
@@ -84,8 +50,9 @@ func (s *PaymentService) Authorize(ctx context.Context, data ChargeInput) (*Char
 
 	// check duplicate idempotency key then return cached
 	idemKeyID := uuid.MustParse(data.IdempotencyKey)
-	if cached, ok := s.cachedIdempotency(ctx, idemKeyID, data.MerchantID, log); ok {
-		return cached, nil
+	var out ChargeOutput
+	if ok := s.cachedIdempotency(ctx, idemKeyID, data.MerchantID, &out, log); ok {
+		return &out, nil
 	}
 
 	// tokenize card (mock)
@@ -121,19 +88,19 @@ func (s *PaymentService) Authorize(ctx context.Context, data ChargeInput) (*Char
 		return nil, err
 	}
 
-	out := &ChargeOutput{
+	out = ChargeOutput{
 		TransactionID: updatedResp.ID,
-		Status:        string(updatedResp.Status),
+		Status:        updatedResp.Status,
 	}
 
 	// save idempotency in backgroud
-	go s.saveIdempotency(idemKeyID, data.MerchantID, out, log)
+	go s.saveIdempotency(idemKeyID, data.MerchantID, &out, log)
 
 	if status == domain.TransactionStatusFailed {
-		return out, domain.ErrGatewayRejected
+		return &out, domain.ErrGatewayRejected
 	}
 
-	return out, nil
+	return &out, nil
 }
 
 func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*CaptureOutput, error) {
@@ -145,14 +112,14 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 		Logger()
 
 	// lock transaction for update
-	lockValue, lockKey, err := s.aquireLock(ctx, data.TransactionID, log)
+	lockKey, lockValue, err := s.aquireLock(ctx, data.TransactionID, log)
 	if err != nil {
 		return nil, err
 	}
 
 	defer func() {
 		if err := s.locker.Release(context.Background(), *lockKey, *lockValue); err != nil {
-			log.Error().Err(err).Msg("failed to release locker")
+			log.Warn().Err(err).Msg("failed to release locker")
 		}
 	}()
 
@@ -181,7 +148,7 @@ func (s *PaymentService) Capture(ctx context.Context, data CaptureInput) (*Captu
 
 	out := &CaptureOutput{
 		TransactionID: updatedResp.ID,
-		Status:        string(updatedResp.Status),
+		Status:        updatedResp.Status,
 	}
 
 	if status == domain.TransactionStatusFailed {
@@ -201,8 +168,9 @@ func (s *PaymentService) Charge(ctx context.Context, data ChargeInput) (*ChargeO
 
 	// check duplicate idempotency key then return cached
 	idemKeyID := uuid.MustParse(data.IdempotencyKey)
-	if cached, ok := s.cachedIdempotency(ctx, idemKeyID, data.MerchantID, log); ok {
-		return cached, nil
+	var out ChargeOutput
+	if ok := s.cachedIdempotency(ctx, idemKeyID, data.MerchantID, &out, log); ok {
+		return &out, nil
 	}
 
 	// tokenize card (mock)
@@ -239,22 +207,22 @@ func (s *PaymentService) Charge(ctx context.Context, data ChargeInput) (*ChargeO
 		updatePayload.GatewayRef = gwRef
 	}
 
-	updated, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
+	updatedResp, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, updatePayload)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to update transaction")
 		return nil, err
 	}
 
-	out := &ChargeOutput{TransactionID: updated.ID, Status: string(updated.Status)}
+	out = ChargeOutput{TransactionID: updatedResp.ID, Status: updatedResp.Status}
 
 	// save idempotency + response cache
-	go s.saveIdempotency(idemKeyID, data.MerchantID, out, log)
+	go s.saveIdempotency(idemKeyID, data.MerchantID, &out, log)
 
 	if status == domain.TransactionStatusFailed {
-		return out, domain.ErrGatewayRejected
+		return &out, domain.ErrGatewayRejected
 	}
 
-	return out, nil
+	return &out, nil
 }
 
 func (s *PaymentService) Void(ctx context.Context, data VoidInput) (*VoidOutput, error) {
@@ -266,14 +234,14 @@ func (s *PaymentService) Void(ctx context.Context, data VoidInput) (*VoidOutput,
 		Logger()
 
 	// lock transaction for update
-	lockValue, lockKey, err := s.aquireLock(ctx, data.TransactionID, log)
+	lockKey, lockValue, err := s.aquireLock(ctx, data.TransactionID, log)
 	if err != nil {
 		return nil, err
 	}
 
 	defer func() {
 		if err := s.locker.Release(context.Background(), *lockKey, *lockValue); err != nil {
-			log.Error().Err(err).Msg("failed to release locker")
+			log.Warn().Err(err).Msg("failed to release locker")
 		}
 	}()
 
@@ -301,7 +269,7 @@ func (s *PaymentService) Void(ctx context.Context, data VoidInput) (*VoidOutput,
 
 	out := &VoidOutput{
 		TransactionID: updatedResp.ID,
-		Status:        string(updatedResp.Status),
+		Status:        updatedResp.Status,
 	}
 
 	if status == domain.TransactionStatusFailed {
@@ -311,43 +279,94 @@ func (s *PaymentService) Void(ctx context.Context, data VoidInput) (*VoidOutput,
 	return out, nil
 }
 
-func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID, log zerolog.Logger) (*ChargeOutput, bool) {
+func (s *PaymentService) Refund(ctx context.Context, data RefundInput) (*RefundOutput, error) {
+	// initialize log Refund service
+	log := s.log.With().
+		Str("func", "Refund").
+		Str("transaction_id", data.TransactionID.String()).
+		Str("merchan_id", data.MerchantID.String()).
+		Logger()
+
+	// check duplicate idempotency key then return cached
+	var out RefundOutput
+	if ok := s.cachedIdempotency(ctx, data.IdempotencyKey, data.MerchantID, &out, log); ok {
+		return &out, nil
+	}
+
+	// lock transaction for update
+	lockKey, lockValue, err := s.aquireLock(ctx, data.TransactionID, log)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if err := s.locker.Release(context.Background(), *lockKey, *lockValue); err != nil {
+			log.Warn().Err(err).Msg("failed to release locker")
+		}
+	}()
+
+	// check transaction captured
+	tx, err := s.txRepo.FindByIDAndMerchantID(ctx, data.TransactionID, data.MerchantID)
+	if err != nil {
+		return nil, err
+	}
+	if tx.Status == domain.TransactionStatusRefunded {
+		return nil, domain.ErrTransactionAlreadyRefunded
+	}
+	if tx.Status != domain.TransactionStatusCaptured {
+		return nil, domain.ErrTransactionNotRefundable
+	}
+
+	// call gateway
+	refundRef, _, err := s.callGatewayRefund(ctx, tx, log)
+	if err != nil {
+		return nil, err
+	}
+
+	// insert refund (processing) and update transaction
+	refund := &domain.Refund{
+		ID:            uuid.New(),
+		TransactionID: tx.ID,
+		MerchantID:    data.MerchantID,
+		Amount:        tx.Amount,
+		Status:        domain.RefundProcessing,
+		RefundRef:     refundRef,
+	}
+	if err := s.createRefundAndUpdateTx(ctx, tx.ID, refund, log); err != nil {
+		return nil, err
+	}
+
+	out = RefundOutput{
+		RefundID: refund.ID,
+		Status:   refund.Status,
+	}
+	// save idempotency in backgroud
+	go s.saveIdempotency(data.IdempotencyKey, data.MerchantID, &out, log)
+
+	return &out, nil
+}
+
+func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID, dest any, log zerolog.Logger) bool {
 	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
 
 	if err != nil || idem == nil {
-		return nil, false
+		return false
 	}
 
-	var out ChargeOutput
-	if err := json.Unmarshal(idem.Response, &out); err != nil {
+	if err := json.Unmarshal(idem.Response, &dest); err != nil {
 		log.Error().Err(err).Msg("failed to unmarshal idempotency response")
-		return nil, false
+		return false
 	}
 
 	log.Warn().Msg("duplicate idempotency key — returning cached response")
-	return &out, true
+	return true
 }
 
-func (s *PaymentService) callGatewayAuthorize(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, gatewayRef, failedReason *string) {
-	gw, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
-		Amount:   tx.Amount,
-		Currency: tx.Currency,
-		OrderID:  tx.ID.String(),
-	})
-	if err != nil || gw == nil {
-		log.Error().Err(err).Msg("failed to authorize gateway")
-		reason := err.Error()
-		return domain.TransactionStatusFailed, nil, &reason
-	}
-
-	return domain.TransactionStatusAuthorized, &gw.GatewayRef, nil
-}
-
-func (s *PaymentService) saveIdempotency(key, merchantID uuid.UUID, out *ChargeOutput, log zerolog.Logger) {
+func (s *PaymentService) saveIdempotency(key, merchantID uuid.UUID, dest any, log zerolog.Logger) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	raw, err := json.Marshal(out)
+	raw, err := json.Marshal(dest)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to json marshall output")
 		return
@@ -414,7 +433,7 @@ func (s *PaymentService) getTxAuthorized(ctx context.Context, id, merchantID uui
 		log.Error().Err(err).Msg("failed to find transaction")
 		return nil, domain.ErrTransactionNotFound
 	}
-	if tx.GatewayRef == nil || *tx.GatewayRef == "" {
+	if tx.GatewayRef == nil {
 		log.Warn().Msg("invalid gateway_ref")
 		return nil, domain.ErrInvalidGatewayRef
 	}
@@ -426,19 +445,66 @@ func (s *PaymentService) getTxAuthorized(ctx context.Context, id, merchantID uui
 	return tx, nil
 }
 
+func (s *PaymentService) createRefundAndUpdateTx(ctx context.Context, txID uuid.UUID, refund *domain.Refund, log zerolog.Logger) error {
+	queryUpdate := map[string]interface{}{
+		"id":     txID,
+		"status": domain.TransactionStatusCaptured,
+	}
+	payload := map[string]interface{}{
+		"status": domain.TransactionStatusRefunded,
+	}
+	_, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, payload)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to update transaction status to refunded")
+		return err
+	}
+
+	// insert refund (processing)
+	if err := s.refundRepo.Create(ctx, refund); err != nil {
+		log.Error().Err(err).Msg("failed to insert refund")
+		return err
+	}
+
+	return nil
+}
+
+func (s *PaymentService) callGatewayAuthorize(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, gatewayRef, failedReason *string) {
+	var reason string
+
+	resp, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
+		Amount:   tx.Amount,
+		Currency: tx.Currency,
+		OrderID:  tx.ID.String(),
+	})
+	if err != nil {
+		log.Error().Err(err).Msg("failed to authorize gateway")
+		reason = err.Error()
+		return domain.TransactionStatusFailed, nil, &reason
+	}
+	if resp == nil {
+		log.Warn().Msg("gateway authorized empty response")
+		reason = "empty gateway response"
+		return domain.TransactionStatusFailed, nil, &reason
+	}
+
+	return domain.TransactionStatusAuthorized, &resp.GatewayRef, nil
+}
+
 func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, gatewayRef, failedReason *string) {
+	var reason string
+
 	resp, err := s.gateway.Capture(ctx, gateway.CaptureRequest{
 		OrderID:    tx.ID.String(),
 		GatewayRef: *tx.GatewayRef,
 	})
 	if err != nil {
 		log.Error().Err(err).Msg("failed to capture gateway")
-		reason := err.Error()
+		reason = err.Error()
 		return domain.TransactionStatusFailed, nil, &reason
 	}
 	if resp == nil {
-		log.Error().Err(err).Msg("gateway returned empty response")
-		reason := "empty gateway response"
+		log.Warn().Msg("gateway captured empty response")
+		reason = "empty gateway response"
 		return domain.TransactionStatusFailed, nil, &reason
 	}
 
@@ -446,18 +512,38 @@ func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Tran
 }
 
 func (s *PaymentService) callGatewayVoid(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, failedReason *string) {
+	var reason string
+
 	resp, err := s.gateway.Void(ctx, gateway.VoidRequest{GatewayRef: *tx.GatewayRef, OrderID: tx.ID.String()})
 	if err != nil {
 		log.Error().Err(err).Msg("failed to void gateway")
-		reason := err.Error()
+		reason = err.Error()
 		return domain.TransactionStatusFailed, &reason
 	}
 	if resp == nil {
-		log.Error().Err(err).Msg("gateway returned empty response")
-		reason := "empty gateway response"
+		log.Warn().Msg("gateway returned empty response")
+		reason = "empty gateway response"
 		return domain.TransactionStatusFailed, &reason
 	}
 	return domain.TransactionStatusVoided, nil
+}
+
+func (s *PaymentService) callGatewayRefund(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (refundRef, failedReason *string, err error) {
+	var reason string
+
+	resp, err := s.gateway.Refund(ctx, gateway.RefundRequest{GatewayRef: *tx.GatewayRef, Amount: tx.Amount})
+	if err != nil {
+		log.Error().Err(err).Msg("failed to refund gateway")
+		reason = err.Error()
+		return nil, &reason, err
+	}
+	if resp == nil {
+		log.Warn().Msg("gateway returned empty response")
+		reason = "empty gateway response"
+		return nil, &reason, domain.ErrGatewayRejected
+	}
+
+	return &resp.RefundRef, nil, nil
 }
 
 func (s *PaymentService) aquireLock(ctx context.Context, transactionID uuid.UUID, log zerolog.Logger) (*string, *string, error) {

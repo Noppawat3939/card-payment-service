@@ -4,7 +4,8 @@ import "errors"
 
 var (
 	// common
-	ErrBodyInvalid = errors.New("invalid body request")
+	ErrBodyInvalid       = errors.New("invalid body request")
+	ErrMissingMerchantID = errors.New("missing merchant id")
 
 	// merchants
 	ErrMerchantAlreadyExists     = errors.New("merchant email already exists")
@@ -12,14 +13,16 @@ var (
 	ErrMerchantStatusNotAccepted = errors.New("merchant current status not accepted")
 
 	// payments
-	ErrDuplicateIdempotencyKey  = errors.New("idempotency key is duplicated")
-	ErrGatewayRejected          = errors.New("gateway request rejected")
-	ErrInvalidGatewayRef        = errors.New("invalid gateway reference")
-	ErrTokenizeCard             = errors.New("card information invalid")
-	ErrTransactionNotCapturable = errors.New("transaction status not capturable")
-	ErrTransactionNotFound      = errors.New("transaction not found")
-	ErrDuplicateRequest         = errors.New("duplicated request")
-	ErrTransactionAlreadyVoided = errors.New("transaction already voided")
+	ErrDuplicateIdempotencyKey    = errors.New("idempotency key is duplicated")
+	ErrGatewayRejected            = errors.New("gateway request rejected")
+	ErrInvalidGatewayRef          = errors.New("invalid gateway reference")
+	ErrTokenizeCard               = errors.New("card information invalid")
+	ErrTransactionNotCapturable   = errors.New("transaction status not capturable")
+	ErrTransactionNotFound        = errors.New("transaction not found")
+	ErrDuplicateRequest           = errors.New("duplicated request")
+	ErrTransactionAlreadyVoided   = errors.New("transaction already voided")
+	ErrTransactionAlreadyRefunded = errors.New("transaction already refunded")
+	ErrTransactionNotRefundable   = errors.New("transaction status not refundable")
 
 	// gateway (mock)
 	ErrCardAmoutInvalid  = errors.New("amount invalid")
