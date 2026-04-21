@@ -181,16 +181,8 @@ credit-card-payment-service/
 │       └── README.md                    # How to run + available events
 │
 ├── migrations/
-│   ├── 000001_create_merchants.up.sql
-│   ├── 000001_create_merchants.down.sql
-│   ├── 000002_create_api_keys.up.sql
-│   ├── 000002_create_api_keys.down.sql
-│   ├── 000003_create_transactions.up.sql
-│   ├── 000003_create_transactions.down.sql
-│   ├── 000004_create_refunds.up.sql
-│   ├── 000004_create_refunds.down.sql
-│   ├── 000005_create_idempotency_keys.up.sql
-│   └── 000005_create_idempotency_keys.down.sql
+│   ├── 000001_xxxxxx.up.sql
+│   └── 000001_xxxxxx.down.sql
 │
 ├── .env.example
 ├── .env.local
