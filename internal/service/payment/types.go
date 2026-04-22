@@ -1,4 +1,4 @@
-package service
+package payment
 
 import (
 	"card-payment-service/internal/domain"

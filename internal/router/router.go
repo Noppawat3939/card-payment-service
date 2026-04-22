@@ -8,6 +8,7 @@ import (
 	"card-payment-service/internal/middleware"
 	"card-payment-service/internal/repository"
 	"card-payment-service/internal/service"
+	"card-payment-service/internal/service/payment"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -54,7 +55,7 @@ func registerPayment(cfg *Config) {
 	gateway := gateway.NewMockGateway()
 
 	redisLocker := appRedis.NewRedisLocker(cfg.client)
-	paymentService := service.NewPaymentService(txRepo, idemRepo, refundRepo, gateway, redisLocker, logger)
+	paymentService := payment.NewPaymentService(txRepo, idemRepo, refundRepo, gateway, redisLocker, logger)
 
 	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
 

@@ -5,7 +5,7 @@ import (
 	"card-payment-service/internal/handler/dto"
 	"card-payment-service/internal/middleware"
 	"card-payment-service/internal/response"
-	"card-payment-service/internal/service"
+	"card-payment-service/internal/service/payment"
 	"errors"
 	"net/http"
 
@@ -15,12 +15,12 @@ import (
 )
 
 type PaymentHandler struct {
-	paymentService *service.PaymentService
+	paymentService *payment.PaymentService
 	log            zerolog.Logger
 }
 
 func NewPaymentHandler(
-	paymentService *service.PaymentService,
+	paymentService *payment.PaymentService,
 	log zerolog.Logger,
 ) *PaymentHandler {
 	return &PaymentHandler{
@@ -58,7 +58,7 @@ func (h *PaymentHandler) Capture(c *gin.Context) {
 
 	merchantID := h.getMerchantIDHeader(c)
 
-	capturedResp, err := h.paymentService.Capture(c, service.CaptureInput{
+	capturedResp, err := h.paymentService.Capture(c, payment.CaptureInput{
 		TransactionID: *transactionID,
 		MerchantID:    *merchantID,
 	})
@@ -102,7 +102,7 @@ func (h *PaymentHandler) Void(c *gin.Context) {
 	transactionID := h.getTransactionIDParam(c)
 	merchantID := h.getMerchantIDHeader(c)
 
-	voidedResp, err := h.paymentService.Void(c, service.VoidInput{
+	voidedResp, err := h.paymentService.Void(c, payment.VoidInput{
 		TransactionID: *transactionID,
 		MerchantID:    *merchantID,
 	})
@@ -124,7 +124,7 @@ func (h *PaymentHandler) Refund(c *gin.Context) {
 	merchantID := h.getMerchantIDHeader(c)
 	idemKey := c.MustGet(middleware.IdempotencyKeyContextKey).(uuid.UUID)
 
-	refundedResp, err := h.paymentService.Refund(c, service.RefundInput{
+	refundedResp, err := h.paymentService.Refund(c, payment.RefundInput{
 		TransactionID:  *transactionID,
 		MerchantID:     *merchantID,
 		IdempotencyKey: idemKey,
@@ -176,11 +176,11 @@ func mapPaymentErrStatusCode(err error) int {
 	}
 }
 
-func buildChargeInput(c *gin.Context, req dto.AuthorizePaymentRequest) *service.ChargeInput {
+func buildChargeInput(c *gin.Context, req dto.AuthorizePaymentRequest) *payment.ChargeInput {
 	merchantID := c.MustGet(middleware.MerchantIDKey).(uuid.UUID)
 	idemKey := c.MustGet(middleware.IdempotencyKeyContextKey).(string)
 
-	return &service.ChargeInput{
+	return &payment.ChargeInput{
 		Amount:         req.Amount,
 		CardNumber:     req.CardNumber,
 		Currency:       req.Currency,

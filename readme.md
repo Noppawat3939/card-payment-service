@@ -107,79 +107,90 @@ pending → authorized → captured → refunded
 credit-card-payment-service/
 ├── cmd/
 │   └── server/
-│       └── main.go                      # App bootstrap + infra init
+│       └── main.go
 │
 ├── internal/
 │   ├── config/
-│   │   └── config.go                    # Env config + DSN helper + Redis address
+│   │   └── config.go
 │   │
 │   ├── infra/
 │   │   ├── database/
-│   │   │   └── database.go              # PostgreSQL connection
+│   │   │   └── database.go
 │   │   └── redis/
-│   │       ├── redis.go                 # Redis connection
-│   │       └── locker.go                # Distributed lock (SET NX EX)
+│   │       ├── redis.go
+│   │       └── locker.go
 │   │
 │   ├── logger/
-│   │   ├── logger.go                    # Zerolog initialization
-│   │   └── middleware.go                # Gin request logging middleware
+│   │   ├── logger.go
+│   │   └── middleware.go
 │   │
 │   ├── domain/
-│   │   ├── merchant.go                  # Merchant entity + status
-│   │   ├── api_key.go                   # API key entity
-│   │   ├── transaction.go               # Transaction entity + lifecycle
-│   │   ├── refund.go                    # Refund entity + status
-│   │   └── errors.go                    # Domain business errors
+│   │   ├── merchant.go
+│   │   ├── api_key.go
+│   │   ├── transaction.go
+│   │   ├── refund.go
+│   │   └── errors.go
 │   │
 │   ├── handler/
 │   │   ├── dto/
-│   │   │   ├── merchant_dto.go          # Merchant request / response DTO
-│   │   │   └── payment_dto.go           # Payment request / response DTO
-│   │   ├── merchant_handler.go          # Merchant endpoints
-│   │   ├── payment_handler.go           # Payment endpoints
-│   │   ├── webhook_handler.go           # Webhook receiver + HMAC verify
-│   │   └── playground_handler.go        # Dev-only testing UI (embed.FS)
+│   │   │   ├── merchant_dto.go
+│   │   │   └── payment_dto.go
+│   │   │
+│   │   ├── merchant_handler.go
+│   │   ├── payment_handler.go
+│   │   ├── webhook_handler.go
+│   │   └── playground_handler.go
 │   │
 │   ├── service/
-│   │   ├── merchant_service.go          # Merchant registration, key management
-│   │   └── payment_service.go           # Payment business flow
+│   │   ├── merchant_service.go
+│   │   │
+│   │   └── payment/                     # Business service
+│   │       ├── service.go               # Authorize / Capture / Charge / Void / Refund
+│   │       ├── types.go                 # Input / Output structs
+│   │       │
+│   │       ├── idempotency.go           # cachedIdempotency / saveIdempotency
+│   │       ├── lock.go                  # acquireLock
+│   │       │
+│   │       ├── gateway.go               # callGatewayAuthorize/Capture/Void/Refund
+│   │       ├── transaction.go           # saveTransaction / getTxAuthorized
+│   │       ├── refund.go                # createRefundAndUpdateTx (refund logic)
 │   │
 │   ├── repository/
-│   │   ├── merchant_repo.go             # Merchant DB access
-│   │   ├── api_key_repo.go              # API key DB access
-│   │   ├── transaction_repo.go          # Transaction DB access
-│   │   ├── refund_repo.go               # Refund DB access
-│   │   └── idempotency_repo.go          # Idempotency key DB access
+│   │   ├── merchant_repo.go
+│   │   ├── api_key_repo.go
+│   │   ├── transaction_repo.go
+│   │   ├── refund_repo.go
+│   │   └── idempotency_repo.go
 │   │
 │   ├── gateway/
-│   │   ├── gateway.go                   # Gateway interface + request/response types
-│   │   ├── mock_gateway.go              # Mock gateway (dev + test)
-│   │   └── retryable_gateway.go         # Retry wrapper (exponential backoff + jitter)
+│   │   ├── gateway.go
+│   │   ├── mock_gateway.go
+│   │   └── retryable_gateway.go
 │   │
 │   ├── middleware/
-│   │   ├── auth.go                      # API key validation + merchant status check
-│   │   ├── idempotency.go               # Duplicate request protection
-│   │   └── rate_limit.go                # Rate limiter
+│   │   ├── auth.go
+│   │   ├── idempotency.go
+│   │   └── rate_limit.go
 │   │
 │   ├── response/
-│   │   ├── response.go                  # Success response formatter
-│   │   └── error.go                     # Error response mapper
+│   │   ├── response.go
+│   │   └── error.go
 │   │
 │   └── router/
-│       └── router.go                    # Route registration + dependency wiring
+│       └── router.go
 │
-├── static/                              # Embedded via embed.FS (dev only)
+├── static/
 │   └── playground/
-│       ├── index.html                   # Payment testing UI
+│       ├── index.html
 │       ├── style.css
 │       └── app.js
 │
 ├── tools/
-│   └── webhook-simulator/               # Dev tool — simulate gateway webhook callbacks
-│       ├── main.go                      # HTTP server (port 8081)
-│       ├── event.go                     # Events from webhook
-│       ├── simulator.go                 # Event builder + HMAC signer
-│       └── README.md                    # How to run + available events
+│   └── webhook-simulator/
+│       ├── main.go
+│       ├── event.go
+│       ├── simulator.go
+│       └── README.md
 │
 ├── migrations/
 │   ├── 000001_xxxxxx.up.sql

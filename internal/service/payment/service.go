@@ -1,4 +1,4 @@
-package service
+package payment
 
 import (
 	"card-payment-service/internal/domain"
@@ -6,7 +6,6 @@ import (
 	"card-payment-service/internal/infra/redis"
 	"card-payment-service/internal/repository"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -346,43 +345,6 @@ func (s *PaymentService) Refund(ctx context.Context, data RefundInput) (*RefundO
 	return &out, nil
 }
 
-func (s *PaymentService) cachedIdempotency(ctx context.Context, key, merchantID uuid.UUID, dest any, log zerolog.Logger) bool {
-	idem, err := s.idemRepo.FindByKeyAndMerchantID(ctx, key, merchantID)
-
-	if err != nil || idem == nil {
-		return false
-	}
-
-	if err := json.Unmarshal(idem.Response, &dest); err != nil {
-		log.Error().Err(err).Msg("failed to unmarshal idempotency response")
-		return false
-	}
-
-	log.Warn().Msg("duplicate idempotency key — returning cached response")
-	return true
-}
-
-func (s *PaymentService) saveIdempotency(key, merchantID uuid.UUID, dest any, log zerolog.Logger) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	raw, err := json.Marshal(dest)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to json marshall output")
-		return
-	}
-
-	if err = s.idemRepo.Create(ctx, &domain.IdempotencyKey{
-		Key:        key,
-		MerchantID: merchantID,
-		Response:   raw,
-		ExpiresAt:  time.Now().Add(24 * time.Hour), // 1d
-	}); err != nil {
-		log.Warn().Err(err).Msg("failed to save idempotency key")
-	}
-
-}
-
 func (s *PaymentService) tokenizeCardToGateway(ctx context.Context, data ChargeInput, log zerolog.Logger) (*gateway.TokenizeResponse, error) {
 	req := gateway.TokenizeRequest{
 		CardNumber:  data.CardNumber,
@@ -398,152 +360,6 @@ func (s *PaymentService) tokenizeCardToGateway(ctx context.Context, data ChargeI
 	}
 
 	return tokenizeResp, nil
-}
-
-func (s *PaymentService) saveTransaction(ctx context.Context,
-	data ChargeInput,
-	paymentType domain.PaymentType,
-	tokenized *gateway.TokenizeResponse,
-	log zerolog.Logger) (*domain.Transaction, error) {
-	tx := &domain.Transaction{
-		Amount:         data.Amount,
-		CardBrand:      tokenized.Brand,
-		CardLastFour:   tokenized.LastFour,
-		CardToken:      tokenized.CardToken,
-		Currency:       data.Currency,
-		Description:    data.Description,
-		ID:             uuid.New(),
-		IdempotencyKey: data.IdempotencyKey,
-		MerchantID:     data.MerchantID,
-		PaymentType:    paymentType,
-		Status:         domain.TransactionStatusPending, // initial
-	}
-
-	if err := s.txRepo.Create(ctx, tx); err != nil {
-		log.Error().Err(err).Msgf("failed to save transaction with payment type: %s", paymentType)
-		return nil, err
-	}
-
-	return tx, nil
-}
-
-func (s *PaymentService) getTxAuthorized(ctx context.Context, id, merchantID uuid.UUID, log zerolog.Logger) (*domain.Transaction, error) {
-	tx, err := s.txRepo.FindByIDAndMerchantID(ctx, id, merchantID)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to find transaction")
-		return nil, domain.ErrTransactionNotFound
-	}
-	if tx.GatewayRef == nil {
-		log.Warn().Msg("invalid gateway_ref")
-		return nil, domain.ErrInvalidGatewayRef
-	}
-	if tx.Status != domain.TransactionStatusAuthorized {
-		log.Warn().Msg("status not authorized")
-		return nil, domain.ErrTransactionNotCapturable
-	}
-
-	return tx, nil
-}
-
-func (s *PaymentService) createRefundAndUpdateTx(ctx context.Context, txID uuid.UUID, refund *domain.Refund, log zerolog.Logger) error {
-	queryUpdate := map[string]interface{}{
-		"id":     txID,
-		"status": domain.TransactionStatusCaptured,
-	}
-	payload := map[string]interface{}{
-		"status": domain.TransactionStatusRefunded,
-	}
-	_, err := s.txRepo.UpdateByQueryAndReturn(ctx, queryUpdate, payload)
-	if err != nil {
-		log.Warn().Err(err).Msg("failed to update transaction status to refunded")
-		return err
-	}
-
-	// insert refund (processing)
-	if err := s.refundRepo.Create(ctx, refund); err != nil {
-		log.Error().Err(err).Msg("failed to insert refund")
-		return err
-	}
-
-	return nil
-}
-
-func (s *PaymentService) callGatewayAuthorize(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, gatewayRef, failedReason *string) {
-	var reason string
-
-	resp, err := s.gateway.Authorize(ctx, gateway.AuthorizeRequest{
-		Amount:   tx.Amount,
-		Currency: tx.Currency,
-		OrderID:  tx.ID.String(),
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("failed to authorize gateway")
-		reason = err.Error()
-		return domain.TransactionStatusFailed, nil, &reason
-	}
-	if resp == nil {
-		log.Warn().Msg("gateway authorized empty response")
-		reason = "empty gateway response"
-		return domain.TransactionStatusFailed, nil, &reason
-	}
-
-	return domain.TransactionStatusAuthorized, &resp.GatewayRef, nil
-}
-
-func (s *PaymentService) callGatewayCapture(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, gatewayRef, failedReason *string) {
-	var reason string
-
-	resp, err := s.gateway.Capture(ctx, gateway.CaptureRequest{
-		OrderID:    tx.ID.String(),
-		GatewayRef: *tx.GatewayRef,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("failed to capture gateway")
-		reason = err.Error()
-		return domain.TransactionStatusFailed, nil, &reason
-	}
-	if resp == nil {
-		log.Warn().Msg("gateway captured empty response")
-		reason = "empty gateway response"
-		return domain.TransactionStatusFailed, nil, &reason
-	}
-
-	return domain.TransactionStatusCaptured, &resp.GatewayRef, nil
-}
-
-func (s *PaymentService) callGatewayVoid(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (status domain.TransactionStatus, failedReason *string) {
-	var reason string
-
-	resp, err := s.gateway.Void(ctx, gateway.VoidRequest{GatewayRef: *tx.GatewayRef, OrderID: tx.ID.String()})
-	if err != nil {
-		log.Error().Err(err).Msg("failed to void gateway")
-		reason = err.Error()
-		return domain.TransactionStatusFailed, &reason
-	}
-	if resp == nil {
-		log.Warn().Msg("gateway returned empty response")
-		reason = "empty gateway response"
-		return domain.TransactionStatusFailed, &reason
-	}
-	return domain.TransactionStatusVoided, nil
-}
-
-func (s *PaymentService) callGatewayRefund(ctx context.Context, tx *domain.Transaction, log zerolog.Logger) (refundRef, failedReason *string, err error) {
-	var reason string
-
-	resp, err := s.gateway.Refund(ctx, gateway.RefundRequest{GatewayRef: *tx.GatewayRef, Amount: tx.Amount})
-	if err != nil {
-		log.Error().Err(err).Msg("failed to refund gateway")
-		reason = err.Error()
-		return nil, &reason, err
-	}
-	if resp == nil {
-		log.Warn().Msg("gateway returned empty response")
-		reason = "empty gateway response"
-		return nil, &reason, domain.ErrGatewayRejected
-	}
-
-	return &resp.RefundRef, nil, nil
 }
 
 func (s *PaymentService) aquireLock(ctx context.Context, transactionID uuid.UUID, log zerolog.Logger) (*string, *string, error) {
