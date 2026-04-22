@@ -13,6 +13,9 @@ DB_URL=postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?ssl
 run:
 	go run $(MAIN_PATH)
 
+simulator:
+	go run ./tools/webhook-simulator/...
+
 dev:
 	air
 

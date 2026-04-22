@@ -177,6 +177,7 @@ credit-card-payment-service/
 ├── tools/
 │   └── webhook-simulator/               # Dev tool — simulate gateway webhook callbacks
 │       ├── main.go                      # HTTP server (port 8081)
+│       ├── event.go                     # Events from webhook
 │       ├── simulator.go                 # Event builder + HMAC signer
 │       └── README.md                    # How to run + available events
 │
