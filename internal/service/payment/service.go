@@ -1,5 +1,7 @@
 package payment
 
+// expose
+
 import (
 	"card-payment-service/internal/domain"
 	"card-payment-service/internal/gateway"

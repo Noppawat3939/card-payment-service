@@ -142,18 +142,11 @@ credit-card-payment-service/
 │   │   └── playground_handler.go
 │   │
 │   ├── service/
-│   │   ├── merchant_service.go
+│   │   └── merchant/
+│   │       └── service.go               # Business merchant services
 │   │   │
-│   │   └── payment/                     # Business service
-│   │       ├── service.go               # Authorize / Capture / Charge / Void / Refund
-│   │       ├── types.go                 # Input / Output structs
-│   │       │
-│   │       ├── idempotency.go           # cachedIdempotency / saveIdempotency
-│   │       ├── lock.go                  # acquireLock
-│   │       │
-│   │       ├── gateway.go               # callGatewayAuthorize/Capture/Void/Refund
-│   │       ├── transaction.go           # saveTransaction / getTxAuthorized
-│   │       ├── refund.go                # createRefundAndUpdateTx (refund logic)
+│   │   └── payment/
+│   │       └── service.go               # Business payment services
 │   │
 │   ├── repository/
 │   │   ├── merchant_repo.go

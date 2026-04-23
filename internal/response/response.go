@@ -64,3 +64,8 @@ func Unauthorized(c *gin.Context, msg string) {
 		Error:   msg,
 	})
 }
+
+func FromError(c *gin.Context, err error) {
+	status := mapPaymentErrStatusCode(err)
+	Error(c, status, err.Error())
+}

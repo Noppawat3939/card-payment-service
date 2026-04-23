@@ -4,8 +4,9 @@ import "errors"
 
 var (
 	// common
-	ErrBodyInvalid       = errors.New("invalid body request")
-	ErrMissingMerchantID = errors.New("missing merchant id")
+	ErrBodyInvalid          = errors.New("invalid body request")
+	ErrMissingMerchantID    = errors.New("missing merchant_id")
+	ErrMissingTransactionID = errors.New("missing transaction_id")
 
 	// merchants
 	ErrMerchantAlreadyExists     = errors.New("merchant email already exists")
