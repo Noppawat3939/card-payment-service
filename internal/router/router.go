@@ -7,7 +7,7 @@ import (
 	"card-payment-service/internal/logger"
 	"card-payment-service/internal/middleware"
 	"card-payment-service/internal/repository"
-	"card-payment-service/internal/service"
+	"card-payment-service/internal/service/merchant"
 	"card-payment-service/internal/service/payment"
 
 	"github.com/gin-gonic/gin"
@@ -35,7 +35,7 @@ func registerMerchant(cfg *Config) {
 	apiKeyRepo := repository.NewAPIKeyRepository(cfg.db)
 
 	logger := logger.With("merchant_service")
-	merchantService := service.NewMerchantService(merchantRepo, apiKeyRepo, logger)
+	merchantService := merchant.NewMerchantService(merchantRepo, apiKeyRepo, logger)
 
 	merchantHandler := handler.NewMerchantHandler(merchantService, logger)
 

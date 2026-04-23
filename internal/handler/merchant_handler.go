@@ -4,7 +4,7 @@ import (
 	"card-payment-service/internal/domain"
 	"card-payment-service/internal/handler/dto"
 	"card-payment-service/internal/response"
-	"card-payment-service/internal/service"
+	"card-payment-service/internal/service/merchant"
 	"errors"
 	"net/http"
 
@@ -13,11 +13,11 @@ import (
 )
 
 type MerchantHandler struct {
-	merchantService *service.MerchantService
+	merchantService *merchant.MerchantService
 	log             zerolog.Logger
 }
 
-func NewMerchantHandler(merchantService *service.MerchantService, log zerolog.Logger) *MerchantHandler {
+func NewMerchantHandler(merchantService *merchant.MerchantService, log zerolog.Logger) *MerchantHandler {
 	return &MerchantHandler{merchantService, log}
 }
 
@@ -30,7 +30,7 @@ func (h *MerchantHandler) Register(c *gin.Context) {
 		return
 	}
 
-	data, err := h.merchantService.Register(c, service.RegisterInput{
+	data, err := h.merchantService.Register(c, merchant.RegisterInput{
 		Name:       req.Name,
 		Email:      req.Email,
 		WebhookURL: req.WebhookURL,
