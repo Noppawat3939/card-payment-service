@@ -4,12 +4,20 @@ import (
 	"card-payment-service/internal/domain"
 	"errors"
 	"net/http"
+
+	"gorm.io/gorm"
 )
 
-func mapPaymentErrStatusCode(err error) int {
+func mapErrStatusCode(err error) int {
 	switch {
+	// 404
+	case errors.Is(err, domain.ErrMerchantNotFound),
+		errors.Is(err, gorm.ErrRecordNotFound):
+		return http.StatusNotFound
 	// 406
-	case errors.Is(err, domain.ErrTokenizeCard):
+	case errors.Is(err, domain.ErrTokenizeCard),
+		errors.Is(err, domain.ErrMerchantAlreadyExists),
+		errors.Is(err, domain.ErrMerchantStatusNotAccepted):
 		return http.StatusNotAcceptable
 	// 409
 	case errors.Is(err, domain.ErrDuplicateIdempotencyKey),

@@ -7,11 +7,14 @@ var (
 	ErrBodyInvalid          = errors.New("invalid body request")
 	ErrMissingMerchantID    = errors.New("missing merchant_id")
 	ErrMissingTransactionID = errors.New("missing transaction_id")
+	ErrMissingApiKey        = errors.New("missing api key")
+	ErrInvalidApiKey        = errors.New("invalid api key")
 
 	// merchants
 	ErrMerchantAlreadyExists     = errors.New("merchant email already exists")
 	ErrMerchantNotFound          = errors.New("merchant email not found")
 	ErrMerchantStatusNotAccepted = errors.New("merchant current status not accepted")
+	ErrMerchantNotActive         = errors.New("merchant not active")
 
 	// payments
 	ErrDuplicateIdempotencyKey    = errors.New("idempotency key is duplicated")

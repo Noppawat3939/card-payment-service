@@ -12,6 +12,7 @@ import (
 type MerchantRepository interface {
 	Create(ctx context.Context, data *domain.Merchant) error
 	FindByEmail(ctx context.Context, email string) (*domain.Merchant, error)
+	FindByID(ctx context.Context, id uuid.UUID) (*domain.Merchant, error)
 	UpdateAndReturn(ctx context.Context, merchantID uuid.UUID, data interface{}) (*domain.Merchant, error)
 }
 
@@ -31,6 +32,19 @@ func (r *merchangeRepository) FindByEmail(ctx context.Context, email string) (*d
 	var data domain.Merchant
 
 	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&data).Error; err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+func (r *merchangeRepository) FindByID(ctx context.Context, id uuid.UUID) (*domain.Merchant, error) {
+	var data domain.Merchant
+
+	if err := r.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&data).
+		Error; err != nil {
+
 		return nil, err
 	}
 	return &data, nil

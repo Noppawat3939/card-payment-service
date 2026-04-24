@@ -26,7 +26,12 @@ func (r *apiKeyRepository) Create(ctx context.Context, data *domain.APIKey) erro
 
 func (r *apiKeyRepository) FindByHashedKey(ctx context.Context, hashedKey string) (*domain.APIKey, error) {
 	var data domain.APIKey
-	if err := r.db.WithContext(ctx).Where("hashed_key = ?", hashedKey).First(&data).Error; err != nil {
+
+	if err := r.db.WithContext(ctx).
+		Where("hashed_key = ?", hashedKey).
+		First(&data).
+		Error; err != nil {
+
 		return nil, err
 	}
 

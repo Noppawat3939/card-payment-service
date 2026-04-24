@@ -264,7 +264,6 @@ Content-Type: application/json
   "data": {
     "merchant_id": "8f7f6d4e-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
     "api_key": "pk_live_xxxxxxxx",
-    "api_secret": "sk_live_xxxxxxxxxxxxx",
     "status": "pending"
   }
 }
@@ -423,7 +422,7 @@ sequenceDiagram
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/{transaction_id}/capture<br/>Header: X-Merchant-ID
+    C->>S: POST /v1/payments/{transaction_id}/capture<br/>Header: X-API-KEY
     S->>S: Validate API Key
 
     S->>R: Acquire lock (key=tx:{transaction_id})
@@ -471,7 +470,7 @@ sequenceDiagram
     participant GW as Payment Gateway
     participant DB as Database
 
-    C->>S: POST /v1/payments/charge<br/>Header: X-Merchant-ID, Idempotency-Key
+    C->>S: POST /v1/payments/charge<br/>Header: X-API-KEY, Idempotency-Key
     S->>S: Validate API Key + request body
     S->>R: Check Idempotency-Key
 

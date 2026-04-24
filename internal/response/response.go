@@ -66,6 +66,6 @@ func Unauthorized(c *gin.Context, msg string) {
 }
 
 func FromError(c *gin.Context, err error) {
-	status := mapPaymentErrStatusCode(err)
+	status := mapErrStatusCode(err)
 	Error(c, status, err.Error())
 }

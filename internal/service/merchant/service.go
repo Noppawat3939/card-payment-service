@@ -4,8 +4,10 @@ import (
 	"card-payment-service/internal/domain"
 	"card-payment-service/internal/repository"
 	"context"
+	"errors"
 
 	"github.com/rs/zerolog"
+	"gorm.io/gorm"
 )
 
 // expose
@@ -20,11 +22,15 @@ func NewMerchantService(merchantRepo repository.MerchantRepository, apiKeyRepo r
 }
 
 func (s *MerchantService) Register(ctx context.Context, data RegisterInput) (*RegisterOutput, error) {
-	log := s.log.With().Str("func", "Register").Str("email", data.Email).Logger()
+	// initialize log Register service
+	log := s.log.With().
+		Str("func", "Register").
+		Str("email", data.Email).
+		Logger()
 
 	// check existing
 	existing, err := s.merchantRepo.FindByEmail(ctx, data.Email)
-	if err != nil {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		log.Error().Msg("failed to find merchant")
 		return nil, err
 	}
@@ -42,23 +48,27 @@ func (s *MerchantService) Register(ctx context.Context, data RegisterInput) (*Re
 	}
 
 	// create api key
-	apiKey, _, err := s.createAPIKey(ctx, merchant.ID)
-	if err != nil {
+	secret, err := s.createAPIKey(ctx, merchant.ID)
+	if err != nil || secret == nil {
 		log.Error().Msg("failed to create api key")
 		return nil, err
 	}
 
 	return &RegisterOutput{
 		MerchantID: merchant.ID.String(),
-		APIKey:     apiKey.HashedKey,
-		APISecret:  apiKey.KeyPrefix,
+		APIKey:     *secret,
 		Status:     string(merchant.Status),
 	}, nil
 }
 
 func (s *MerchantService) Activate(ctx context.Context, email string) (*domain.Merchant, error) {
-	log := s.log.With().Str("func", "Activate").Str("email", email).Logger()
+	// initialize log Activate service
+	log := s.log.With().
+		Str("func", "Activate").
+		Str("email", email).
+		Logger()
 
+	// check existing and no active
 	existing, err := s.merchantRepo.FindByEmail(ctx, email)
 	if err != nil {
 		log.Error().Msg("failed to find merchant")
@@ -73,11 +83,12 @@ func (s *MerchantService) Activate(ctx context.Context, email string) (*domain.M
 		return nil, domain.ErrMerchantStatusNotAccepted
 	}
 
-	values := map[string]interface{}{
+	// update status to active
+	payload := map[string]interface{}{
 		"status": domain.MerchantStatusActive,
 	}
 
-	merchant, err := s.merchantRepo.UpdateAndReturn(ctx, existing.ID, values)
+	merchant, err := s.merchantRepo.UpdateAndReturn(ctx, existing.ID, payload)
 	if err != nil {
 		log.Error().Msg("failed to update merchant")
 		return nil, err

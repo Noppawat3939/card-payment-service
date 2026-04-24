@@ -1,12 +1,9 @@
 package handler
 
 import (
-	"card-payment-service/internal/domain"
 	"card-payment-service/internal/handler/dto"
 	"card-payment-service/internal/response"
 	"card-payment-service/internal/service/merchant"
-	"errors"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -36,18 +33,12 @@ func (h *MerchantHandler) Register(c *gin.Context) {
 		WebhookURL: req.WebhookURL,
 	})
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if errors.Is(err, domain.ErrMerchantAlreadyExists) {
-			statusCode = http.StatusNotAcceptable
-		}
-
-		response.Error(c, statusCode, err.Error())
+		response.FromError(c, err)
 		return
 	}
 
 	response.Created(c, &dto.RegisterMerchantResponse{
 		APIKey:     data.APIKey,
-		APISecret:  data.APISecret,
 		MerchantID: data.MerchantID,
 		Status:     data.Status,
 	})
@@ -64,15 +55,7 @@ func (h *MerchantHandler) Activate(c *gin.Context) {
 
 	merchant, err := h.merchantService.Activate(c, req.Email)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if errors.Is(err, domain.ErrMerchantNotFound) {
-			statusCode = http.StatusNotFound
-		}
-		if errors.Is(err, domain.ErrMerchantStatusNotAccepted) {
-			statusCode = http.StatusNotAcceptable
-		}
-
-		response.Error(c, statusCode, err.Error())
+		response.FromError(c, err)
 		return
 	}
 

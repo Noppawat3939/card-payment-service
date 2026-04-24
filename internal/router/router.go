@@ -7,6 +7,7 @@ import (
 	"card-payment-service/internal/logger"
 	"card-payment-service/internal/middleware"
 	"card-payment-service/internal/repository"
+	"card-payment-service/internal/service/auth"
 	"card-payment-service/internal/service/merchant"
 	"card-payment-service/internal/service/payment"
 
@@ -56,11 +57,12 @@ func registerPayment(cfg *Config) {
 
 	redisLocker := appRedis.NewRedisLocker(cfg.client)
 	paymentService := payment.NewPaymentService(txRepo, idemRepo, refundRepo, gateway, redisLocker, logger)
+	authService := initAuthService(cfg)
 
 	paymentHandler := handler.NewPaymentHandler(paymentService, logger)
 
 	payment := cfg.rg.Group("/payments")
-	payment.Use(middleware.MerchantAuth())
+	payment.Use(middleware.MerchantAuth(authService))
 
 	// routes required idempotency key
 	withIdemKey := payment.Group("")
@@ -73,4 +75,12 @@ func registerPayment(cfg *Config) {
 	// routes without idempotency key
 	payment.POST("/:transaction_id/capture", paymentHandler.Capture)
 	payment.POST(":transaction_id/void", paymentHandler.Void)
+}
+
+func initAuthService(cfg *Config) auth.AuthService {
+	apiRepo := repository.NewAPIKeyRepository(cfg.db)
+	merchantRepo := repository.NewMerchantRepository(cfg.db)
+	service := auth.NewAuthService(apiRepo, merchantRepo)
+
+	return service
 }

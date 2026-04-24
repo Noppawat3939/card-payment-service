@@ -3,30 +3,30 @@ package middleware
 import (
 	"card-payment-service/internal/domain"
 	"card-payment-service/internal/response"
+	"card-payment-service/internal/service/auth"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 const MerchantIDKey = "merchant_id"
 
-func MerchantAuth() gin.HandlerFunc {
+func MerchantAuth(as auth.AuthService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		key := c.GetHeader("X-Merchant-ID")
-		if key == "" {
-			response.Unauthorized(c, domain.ErrMissingMerchantID.Error())
+		apiKey := c.GetHeader("X-API-KEY")
+		if apiKey == "" {
+			response.Unauthorized(c, domain.ErrMissingApiKey.Error())
 			c.Abort()
 			return
 		}
 
-		parsed, err := uuid.Parse(key)
+		merchant, err := as.ValidateAPIKey(c, apiKey)
 		if err != nil {
-			response.Unauthorized(c, "invalid merchant_id format")
+			response.Unauthorized(c, domain.ErrInvalidApiKey.Error())
 			c.Abort()
 			return
 		}
 
-		c.Set(MerchantIDKey, parsed)
+		c.Set(MerchantIDKey, merchant.ID)
 		c.Next()
 	}
 }
