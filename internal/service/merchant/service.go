@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// expose
 type MerchantService struct {
 	merchantRepo repository.MerchantRepository
 	apiKeyRepo   repository.APIKeyRepository
