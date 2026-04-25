@@ -1,4 +1,4 @@
-package merchant
+package service
 
 type RegisterInput struct {
 	Name       string

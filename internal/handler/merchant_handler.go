@@ -3,18 +3,18 @@ package handler
 import (
 	"card-payment-service/internal/handler/dto"
 	"card-payment-service/internal/response"
-	"card-payment-service/internal/service/merchant"
+	"card-payment-service/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 )
 
 type MerchantHandler struct {
-	merchantService *merchant.MerchantService
+	merchantService *service.MerchantService
 	log             zerolog.Logger
 }
 
-func NewMerchantHandler(merchantService *merchant.MerchantService, log zerolog.Logger) *MerchantHandler {
+func NewMerchantHandler(merchantService *service.MerchantService, log zerolog.Logger) *MerchantHandler {
 	return &MerchantHandler{merchantService, log}
 }
 
@@ -27,7 +27,7 @@ func (h *MerchantHandler) Register(c *gin.Context) {
 		return
 	}
 
-	data, err := h.merchantService.Register(c, merchant.RegisterInput{
+	data, err := h.merchantService.Register(c, service.RegisterInput{
 		Name:       req.Name,
 		Email:      req.Email,
 		WebhookURL: req.WebhookURL,

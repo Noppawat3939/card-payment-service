@@ -5,7 +5,7 @@ import (
 	"card-payment-service/internal/handler/mapper"
 	"card-payment-service/internal/httpx"
 	"card-payment-service/internal/response"
-	"card-payment-service/internal/service/payment"
+	"card-payment-service/internal/service"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,12 +13,12 @@ import (
 )
 
 type PaymentHandler struct {
-	paymentService *payment.PaymentService
+	paymentService *service.PaymentService
 	log            zerolog.Logger
 }
 
 func NewPaymentHandler(
-	paymentService *payment.PaymentService,
+	paymentService *service.PaymentService,
 	log zerolog.Logger,
 ) *PaymentHandler {
 	return &PaymentHandler{
@@ -57,7 +57,7 @@ func (h *PaymentHandler) Capture(c *gin.Context) {
 		return
 	}
 
-	capturedResp, err := h.paymentService.Capture(c, payment.CaptureInput{
+	capturedResp, err := h.paymentService.Capture(c, service.CaptureInput{
 		TransactionID: meta.TransactionID,
 		MerchantID:    meta.MerchantID,
 	})
@@ -102,7 +102,7 @@ func (h *PaymentHandler) Void(c *gin.Context) {
 		return
 	}
 
-	voidedResp, err := h.paymentService.Void(c, payment.VoidInput{
+	voidedResp, err := h.paymentService.Void(c, service.VoidInput{
 		TransactionID: meta.TransactionID,
 		MerchantID:    meta.MerchantID,
 	})
@@ -125,7 +125,7 @@ func (h *PaymentHandler) Refund(c *gin.Context) {
 		return
 	}
 
-	refundedResp, err := h.paymentService.Refund(c, payment.RefundInput{
+	refundedResp, err := h.paymentService.Refund(c, service.RefundInput{
 		TransactionID:  meta.TransactionID,
 		MerchantID:     meta.MerchantID,
 		IdempotencyKey: meta.IdempotencyKey,
